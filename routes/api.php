@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\ClanDiscoveryController;
+use App\Http\Controllers\PlayerDiscoveryController;
 
 // --- Authentification ---
 Route::post('/auth/register', [AuthController::class, 'register']);
@@ -17,8 +18,9 @@ Route::get('/login', function () {
 Route::get('/tournament/leaderboard', [\App\Http\Controllers\TournamentController::class, 'getLeaderboard']);
 Route::get('/tournament/bracket', [\App\Http\Controllers\TournamentController::class, 'getBracket']);
 
-// --- Découverte des Clans ---
+// --- Découverte des Clans & Joueurs ---
 Route::get('/clans/cameroun', [ClanDiscoveryController::class, 'searchCamerounClans']);
+Route::get('/players/cameroun', [PlayerDiscoveryController::class, 'getCamerounRankings']);
 Route::middleware('auth:sanctum')->group(function () {
     // --- Profil & Auth ---
     Route::get('/auth/me', [AuthController::class, 'me']);

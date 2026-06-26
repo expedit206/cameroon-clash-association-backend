@@ -17,27 +17,24 @@ class ClanDiscoveryController extends Controller
 
     /**
      * Recherche des clans camerounais via l'API CoC.
-     * Location ID Cameroun : 32000045
+     * Location ID Cameroun : 32000046
      */
     public function searchCamerounClans(Request $request)
     {
         $query = [
-            'locationId' => 32000045, // Cameroun
+            'locationId' => 32000046, // Cameroon (ID vérifié via /locations)
             'limit'      => $request->query('limit', 20),
             'after'      => $request->query('after'),
+            'minClanLevel' => $request->query('minClanLevel', 2), // Default 2
+            'minMembers' => $request->query('minMembers', 2),    // Default 2
         ];
 
         // Filtres optionnels
         if ($request->has('name')) {
             $query['name'] = $request->query('name');
         }
-        if ($request->has('minMembers')) {
-            $query['minMembers'] = $request->query('minMembers');
-        }
-        if ($request->has('minClanLevel')) {
-            $query['minClanLevel'] = $request->query('minClanLevel');
-        }
 
+      
         $results = $this->cocApi->searchClans($query);
 
         if (!$results) {

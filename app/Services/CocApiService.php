@@ -139,6 +139,30 @@ class CocApiService
     }
 
     /**
+     * Récupère le classement des joueurs par localisation.
+     * 
+     * @param int $locationId
+     * @return array|null
+     */
+    public function getPlayerRankings(int $locationId): ?array
+    {
+        try {
+            $response = Http::withToken($this->token)
+                ->get("{$this->baseUrl}/locations/{$locationId}/rankings/players");
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::error("CoC API Error (PlayerRankings): " . $response->status());
+            return null;
+        } catch (\Exception $e) {
+            Log::error("CoC API Exception (PlayerRankings): " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Formate le tag pour l'URL en remplaçant # par %23.
      * 
      * @param string $tag
