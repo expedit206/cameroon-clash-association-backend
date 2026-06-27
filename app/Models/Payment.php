@@ -11,6 +11,8 @@ class Payment extends Model
 
     protected $fillable = [
         'clan_registration_id',
+        'user_id',
+        'player_tag',
         'amount',
         'currency',
         'reference',

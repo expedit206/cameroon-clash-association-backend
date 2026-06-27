@@ -146,7 +146,7 @@ class AuthController extends Controller
                 ]);
             }
         } catch (\Exception $e) {
-            Log::warning('[Auth] Could not update CoC metadata during login for ' . $user->tag_coc);
+            \Log::warning('[Auth] Could not update CoC metadata during login for ' . $user->tag_coc);
         }
 
         return response()->json([
@@ -154,6 +154,37 @@ class AuthController extends Controller
             'token_type' => 'Bearer',
             'user' => $user
         ]);
+    }
+
+    /**
+     * Synchronise les données CoC de l'utilisateur avec l'API officielle.
+     */
+    public function syncCocData(Request $request)
+    {
+        $user = $request->user();
+
+        try {
+            $cocPlayer = $this->cocApi->getPlayer($user->tag_coc);
+            
+            if (!$cocPlayer) {
+                return response()->json(['message' => 'Impossible de récupérer les données CoC.'], 422);
+            }
+
+            $user->update([
+                'name'             => $cocPlayer['name'] ?? $user->name,
+                'hdv_level'        => $cocPlayer['townHallLevel'] ?? $user->hdv_level,
+                'current_clan_tag' => $cocPlayer['clan']['tag'] ?? $user->current_clan_tag,
+                'league_icon'      => $cocPlayer['league']['iconUrls']['small'] ?? $user->league_icon,
+                'exp_level'        => $cocPlayer['expLevel'] ?? $user->exp_level,
+            ]);
+
+            return response()->json([
+                'message' => 'Données synchronisées avec succès !',
+                'user' => $user
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors de la synchronisation : ' . $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -177,7 +208,8 @@ class AuthController extends Controller
         $user = $request->user()->load([
             'capitained_clan',
             'registrations.competition',
-            'registrations.players.user'
+            'registrations.players.user',
+            'current_clan'
         ]);
 
         return response()->json($user);

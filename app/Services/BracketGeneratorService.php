@@ -59,4 +59,48 @@ class BracketGeneratorService
             return true;
         });
     }
+
+    /**
+     * Fait progresser le tournoi vers le round suivant si tous les matches du round actuel sont finis.
+     */
+    public function advanceTournament(Competition $competition, $currentRound)
+    {
+        return DB::transaction(function () use ($competition, $currentRound) {
+            $nextRound = $currentRound + 1;
+            if ($nextRound > 4) return false; // Tournoi fini
+
+            // 1. Récupérer les matches du round actuel
+            $matches = TournamentMatch::where('competition_id', $competition->id)
+                ->where('round', $currentRound)
+                ->orderBy('match_number')
+                ->get();
+
+            // Vérifier s'ils sont tous complétés
+            if ($matches->where('status', '!=', 'completed')->count() > 0) {
+                return false; // Pas encore prêt
+            }
+
+            // 2. Créer les matches du round suivant (Pairage 1-2, 3-4...)
+            $winners = $matches->pluck('winner_clan_id');
+            $nextMatchCount = $matches->count() / 2;
+
+            for ($i = 0; $i < $nextMatchCount; $i++) {
+                $clan1Id = $winners[$i * 2];
+                $clan2Id = $winners[$i * 2 + 1];
+
+                TournamentMatch::firstOrCreate([
+                    'competition_id' => $competition->id,
+                    'round' => $nextRound,
+                    'match_number' => $i + 1,
+                ], [
+                    'clan_home_id' => $clan1Id,
+                    'clan_away_id' => $clan2Id,
+                    'status' => 'scheduled',
+                    'scheduled_at' => now()->addDays(2),
+                ]);
+            }
+
+            return true;
+        });
+    }
 }

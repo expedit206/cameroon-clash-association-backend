@@ -29,7 +29,7 @@ class RegistrationController extends Controller
     public function getEligibleMembers(Request $request, Competition $competition)
     {
         $user = $request->user();
-        $clan = $user->capitainedClan;
+        $clan = $user->capitained_clan;
 
         if (!$clan) {
             return response()->json(['message' => "Vous n'avez pas de clan enregistré."], 403);
@@ -53,10 +53,46 @@ class RegistrationController extends Controller
     public function registerTeam(Request $request, Competition $competition)
     {
         $user = $request->user();
-        $clan = $user->capitainedClan;
+        $clan = $user->capitained_clan;
+        $clanTag = $user->current_clan_tag;
 
-        if (!$clan || $clan->status !== 'validated') {
-            return response()->json(['message' => "Votre clan doit être validé par l'admin avant l'inscription."], 403);
+        // Si le clan n'est pas dans la BD, on vérifie s'il y a une élection gagnée
+        if (!$clan) {
+            $election = \App\Models\CaptainElection::where('clan_tag', $clanTag)
+                ->where('competition_id', $competition->id)
+                ->where('winner_id', $user->id)
+                ->where('status', 'closed')
+                ->first();
+
+            if (!$election) {
+                return response()->json(['message' => "Seul le capitaine élu par le clan peut soumettre le roster."], 403);
+            }
+
+            // Création JIT du clan
+            $cocClan = $this->cocApi->getClan($clanTag);
+            $clan = \App\Models\Clan::create([
+                'tag_coc' => strtoupper($clanTag),
+                'name' => $cocClan['name'] ?? 'Clan Inconnu',
+                'captain_id' => $user->id,
+                'badge_url' => $cocClan['badgeUrls']['medium'] ?? null,
+                'clan_level' => $cocClan['clanLevel'] ?? 1,
+                'status' => 'pending', // Validation finale par l'admin lors du roster
+            ]);
+            
+            // Mettre à jour le rôle de l'user
+            $user->update(['role' => 'captain']);
+        }
+
+        // Si on est ici, soit le clan existait, soit il vient d'être créé.
+        // On vérifie une dernière fois si l'user est bien le vainqueur de l'élection
+        $election = \App\Models\CaptainElection::where('clan_tag', $clan->tag_coc)
+            ->where('competition_id', $competition->id)
+            ->where('winner_id', $user->id)
+            ->where('status', 'closed')
+            ->first();
+
+        if (!$election) {
+            return response()->json(['message' => "Seul le capitaine élu pour ce tournoi peut soumettre le roster."], 403);
         }
 
         $validator = Validator::make($request->all(), [
@@ -118,20 +154,36 @@ class RegistrationController extends Controller
      */
     public function status(Request $request, Competition $competition)
     {
-        $clan = $request->user()->capitainedClan;
+        $user = $request->user();
+        $clan = $user->capitained_clan;
         
-        if (!$clan) return response()->json(['message' => 'Aucun clan'], 404);
+        $registration = null;
 
-        $registration = ClanRegistration::where('clan_id', $clan->id)
-            ->where('competition_id', $competition->id)
-            ->with(['players.user', 'payment'])
-            ->first();
+        if ($clan) {
+            $registration = ClanRegistration::where('clan_id', $clan->id)
+                ->where('competition_id', $competition->id)
+                ->first();
+        }
 
-        return response()->json($registration);
+        // Si pas capitaine ou pas de registration trouvée via le clan possédé, on cherche via les rosters
+        if (!$registration) {
+            $playerId = $user->id;
+            $registration = ClanRegistration::where('competition_id', $competition->id)
+                ->whereHas('players', function($query) use ($playerId) {
+                    $query->where('player_id', $playerId);
+                })
+                ->first();
+        }
+
+        if (!$registration) {
+            return response()->json(['message' => 'Aucune inscription trouvée pour votre clan dans cette compétition.'], 404);
+        }
+
+        return response()->json($registration->load(['players.user', 'payments', 'clan']));
     }
 
     /**
-     * Initier le paiement (Phase 3).
+     * Initier le paiement individuel (Phase 3).
      */
     public function initiatePayment(Request $request, ClanRegistration $registration)
     {
@@ -139,29 +191,60 @@ class RegistrationController extends Controller
             'payment_method' => 'required|string',
             'phone_number' => 'required|string',
             'transaction_reference' => 'required|string',
+            'for_player_tag' => 'nullable|string', // Optional: if someone pays for a teammate
         ]);
 
-        $registration->update([
-            'status' => 'pending_confirmation',
-            'payment_reference' => $request->transaction_reference,
-            'paid_at' => now(),
-        ]);
+        $user = $request->user();
+        $targetUser = $user;
 
-        // Créer l'entrée dans la table payments
-        \App\Models\Payment::updateOrCreate(
-            ['clan_registration_id' => $registration->id],
-            [
-                'amount' => $registration->competition->registration_fee,
-                'currency' => 'XAF',
-                'reference' => $request->transaction_reference,
-                'status' => 'pending',
-                'payment_method' => $request->payment_method,
-                'phone_number' => $request->phone_number,
-            ]
-        );
+        // Si on paie pour un coéquipier
+        if ($request->for_player_tag) {
+            $targetUser = User::where('tag_coc', strtoupper($request->for_player_tag))->first();
+            if (!$targetUser) {
+                return response()->json(['message' => "Joueur introuvable."], 404);
+            }
+        }
+
+        // Vérifier si le joueur est dans le roster
+        $rosterPlayer = RegistrationPlayer::where('clan_registration_id', $registration->id)
+            ->where('player_id', $targetUser->id)
+            ->first();
+
+        if (!$rosterPlayer) {
+            return response()->json(['message' => "Ce joueur ne fait pas partie du roster enregistré."], 422);
+        }
+
+        // Règle : Seuls les TITULAIRES paient à l'inscription
+        if ($rosterPlayer->is_substitute) {
+            // Sauf s'il y a une substitution en cours ? (A implémenter plus tard dans DuelController/SubstitutionController)
+            return response()->json(['message' => "Les remplaçants ne paient pas de frais d'inscription à cette étape."], 422);
+        }
+
+        // Vérifier si déjà payé
+        $alreadyPaid = \App\Models\Payment::where('clan_registration_id', $registration->id)
+            ->where('user_id', $targetUser->id)
+            ->where('status', 'confirmed')
+            ->exists();
+
+        if ($alreadyPaid) {
+            return response()->json(['message' => "Ce joueur a déjà payé ses frais de participation."], 422);
+        }
+
+        // Créer l'entrée dans la table payments (Individuel : 1000 FCFA)
+        \App\Models\Payment::create([
+            'clan_registration_id' => $registration->id,
+            'user_id' => $targetUser->id,
+            'player_tag' => $targetUser->tag_coc,
+            'amount' => 1000, 
+            'currency' => 'XAF',
+            'reference' => $request->transaction_reference,
+            'status' => 'pending',
+            'payment_method' => $request->payment_method,
+            'phone_number' => $request->phone_number,
+        ]);
 
         return response()->json([
-            'message' => "Paiement soumis. L'administrateur validera votre inscription sous peu."
+            'message' => "Paiement de 1 000 FCFA soumis pour " . $targetUser->name . ". En attente de validation."
         ]);
     }
 }

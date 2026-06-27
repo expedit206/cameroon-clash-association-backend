@@ -61,10 +61,10 @@ class ClanRegistration extends Model
     }
 
     /**
-     * Get the payment associated with this registration.
+     * Get the payments associated with this registration (individual fees).
      */
-    public function payment()
+    public function payments()
     {
-        return $this->hasOne(Payment::class);
+        return $this->hasMany(Payment::class);
     }
 }

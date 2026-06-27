@@ -103,16 +103,24 @@ class ClanController extends Controller
         }
 
         // 2. Récupérer les utilisateurs de la plateforme qui sont dans ce clan
-        $platformUsers = User::where('current_clan_tag', $clanTag)
+        // On normalise les tags pour assurer une correspondance robuste
+        $normalClanTag = strtoupper(trim($clanTag));
+        $platformUsers = User::where(function($q) use ($normalClanTag) {
+                $q->where('current_clan_tag', $normalClanTag)
+                  ->orWhere('current_clan_tag', str_replace('#', '', $normalClanTag));
+            })
             ->get()
-            ->keyBy('tag_coc');
+            ->keyBy(function($u) {
+                return strtoupper(trim($u->tag_coc));
+            });
 
         // 3. Fusionner les données
         $members = array_map(function ($member) use ($platformUsers) {
-            $tag = $member['tag'];
-            $platformUser = $platformUsers->get($tag);
+            $tag = strtoupper(trim($member['tag']));
+            $platformUser = $platformUsers->get($tag) ?? $platformUsers->get(str_replace('#', '', $tag));
 
             return [
+                'id' => $platformUser?->id, // On aplatit l'ID pour faciliter l'accès au vote
                 'tag_coc' => $tag,
                 'name' => $member['name'],
                 'role_coc' => $member['role'],
@@ -175,9 +183,10 @@ class ClanController extends Controller
             'tag_coc'     => $cocClan['tag'],
             'clan_level'  => $cocClan['clanLevel'],
             'badge_url'   => $cocClan['badgeUrls']['medium'] ?? null,
-            'members'     => $cocClan['members'],
+            'members'     => $cocClan['members'] ?? [],
             'description' => $cocClan['description'] ?? null,
             'type'        => $cocClan['type'] ?? null,
+            'location'    => $cocClan['location'] ?? null,
         ]);
     }
 }

@@ -12,8 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('league_icon')->nullable();
-            $table->integer('exp_level')->default(0);
+            if (!Schema::hasColumn('users', 'league_icon')) {
+                $table->string('league_icon')->nullable();
+            }
+            if (!Schema::hasColumn('users', 'exp_level')) {
+                $table->integer('exp_level')->default(0);
+            }
         });
     }
 

@@ -10,6 +10,13 @@ use Carbon\Carbon;
 
 class ElectionController extends Controller
 {
+    protected \App\Services\CocApiService $cocApi;
+
+    public function __construct(\App\Services\CocApiService $cocApi)
+    {
+        $this->cocApi = $cocApi;
+    }
+
     /**
      * Lance une élection dans le clan de l'utilisateur.
      */
@@ -29,6 +36,30 @@ class ElectionController extends Controller
 
         if ($existing) {
             return response()->json(['message' => "Une élection est déjà en cours dans ce clan."], 422);
+        }
+
+        // 1. Vérification du clan via l'API CoC (Real-time)
+        $cocClan = $this->cocApi->getClan($clanTag);
+        if (!$cocClan) {
+            return response()->json(['message' => "Impossible de récupérer les détails du clan CoC."], 422);
+        }
+
+        // 2. Vérification de la localisation (Cameroun uniquement)
+        $location = $cocClan['location'] ?? null;
+        if (!$location || $location['name'] !== 'Cameroon') {
+            return response()->json(['message' => "Le tournoi CCA National League est exclusivement réservé aux clans d'origine Camerounaise sur Clash of Clans."], 403);
+        }
+
+        // 3. Vérification du rôle (Chef ou Sous-Chef uniquement peuvent lancer l'élection)
+        $cocMember = collect($cocClan['memberList'] ?? [])->firstWhere('tag', $user->tag_coc);
+        $userRole = $cocMember['role'] ?? null;
+        if (!in_array($userRole, ['leader', 'coLeader'])) {
+            return response()->json(['message' => "Seuls les Chefs et Sous-Chefs du clan peuvent lancer une élection de capitaine."], 403);
+        }
+
+        // 4. Vérification de l'éligibilité du lanceur (HDV 14+)
+        if ($user->hdv_level < 14) {
+             return response()->json(['message' => "Vous devez avoir un HDV 14 minimum pour initier une élection."], 403);
         }
 
         $election = CaptainElection::create([
@@ -71,6 +102,11 @@ class ElectionController extends Controller
         
         if ($candidate->current_clan_tag !== $election->clan_tag || !$candidate->is_validated) {
             return response()->json(['message' => "Ce candidat n'est pas éligible."], 422);
+        }
+
+        // Vérification HDV 14+ obligatoire pour être candidat
+        if (($candidate->hdv_level ?? 0) < 14) {
+            return response()->json(['message' => "Ce candidat n'a pas le HDV 14 minimum requis pour être élu Capitaine."], 422);
         }
 
         $vote = CaptainVote::updateOrCreate(
@@ -126,6 +162,30 @@ class ElectionController extends Controller
         return response()->json([
             'message' => "L'élection est terminée. {$winner->name} est le nouveau capitaine.",
             'winner' => $winner
+        ]);
+    }
+
+    /**
+     * Récupère l'élection en cours pour le clan de l'utilisateur.
+     */
+    public function current(Request $request)
+    {
+        $user = $request->user();
+        $clanTag = $request->clan_tag ?: $user->current_clan_tag;
+
+        if (!$clanTag) {
+            return response()->json(['message' => "Tag de clan manquant."], 400);
+        }
+
+        $election = CaptainElection::where('clan_tag', $clanTag)
+            ->whereIn('status', ['open', 'closed'])
+            ->with(['winner', 'votes'])
+            ->withCount('votes')
+            ->orderByDesc('created_at')
+            ->first();
+
+        return response()->json([
+            'election' => $election
         ]);
     }
 }

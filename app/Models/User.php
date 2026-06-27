@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-
+// use 
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -98,5 +98,10 @@ class User extends Authenticatable
             'id',
             'clan_registration_id'
         );
+    }
+    //current clan
+    public function current_clan()
+    {
+        return $this->belongsTo(Clan::class, 'current_clan_tag', 'tag_coc');
     }
 }
