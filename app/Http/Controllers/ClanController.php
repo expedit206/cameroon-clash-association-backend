@@ -170,6 +170,7 @@ class ClanController extends Controller
 
         // Appel direct à l'API CoC via le service dédié
         $cocClan = $this->cocApi->getClan($decodedTag);
+        // $cocClan = $this->cocApi->getClan($decodedTag);
 
         if (!$cocClan) {
             return response()->json([
