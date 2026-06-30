@@ -27,7 +27,6 @@ class User extends Authenticatable
         'is_active',
         'is_validated',
         'validated_at',
-        'profile_status',
         'status',
         'screenshot_proof',
         'league_icon',

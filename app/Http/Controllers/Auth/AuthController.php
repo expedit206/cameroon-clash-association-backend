@@ -32,7 +32,6 @@ class AuthController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'tag_coc' => 'required|string|unique:users,tag_coc',
-            'name' => 'required|string|max:100', // Nom affiché sur la plateforme
             'password' => 'required|string|min:8|confirmed',
             'phone_whatsapp' => 'required|string',
             'screenshot_proof' => 'required|image|max:2048', // Max 2Mo
@@ -60,7 +59,7 @@ class AuthController extends Controller
         // Création de l'utilisateur
         $user = User::create([
             'tag_coc' => strtoupper($request->tag_coc),
-            'name' => $request->name,
+            'name' => $cocPlayer['name'], // Nom officiel Clash of Clans
             'password' => Hash::make($request->password),
             'role' => 'player',
             'hdv_level' => $cocPlayer['townHallLevel'],
@@ -136,13 +135,20 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // Mise à jour des métadonnées CoC de façon persistante
+        // Mise à jour des métadonnées CoC de façon persistante (Synchronisation complète)
         try {
             $cocPlayer = $this->cocApi->getPlayer($user->tag_coc);
             if ($cocPlayer) {
+                // Synchroniser le vrai clan et les stats du joueur depuis l'API officielle
+                // Ceci permet d'éviter que le joueur reste rattaché à un ancien clan s'il l'a quitté en jeu
+                $clanTag = $cocPlayer['clan']['tag'] ?? null;
+                
                 $user->update([
-                    'league_icon' => $cocPlayer['league']['iconUrls']['small'] ?? $user->league_icon,
-                    'exp_level'   => $cocPlayer['expLevel'] ?? $user->exp_level,
+                    'name'             => $cocPlayer['name'] ?? $user->name,
+                    'hdv_level'        => $cocPlayer['townHallLevel'] ?? $user->hdv_level,
+                    'current_clan_tag' => $clanTag,
+                    'league_icon'      => $cocPlayer['league']['iconUrls']['small'] ?? $user->league_icon,
+                    'exp_level'        => $cocPlayer['expLevel'] ?? $user->exp_level,
                 ]);
             }
         } catch (\Exception $e) {
@@ -222,14 +228,14 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
-        if ($user->profile_status !== 'none' && $user->profile_status !== 'rejected') {
+        if ($user->status !== 'pending' && $user->status !== 'rejected') {
             return response()->json([
                 'message' => 'Une demande de validation est déjà en cours ou a déjà été traitée.'
             ], 422);
         }
 
         $user->update([
-            'profile_status' => 'pending'
+            'status' => 'pending'
         ]);
 
         return response()->json([

@@ -73,5 +73,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/competitions/{competition}/generate-bracket', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateBracket']);
         Route::put('/admin/matches/{match}', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'updateMatch']);
     });
+
+    // --- Suivi des Paiements Utilisateur ---
+    Route::get('/payments/status/{reference}', [\App\Http\Controllers\NotchPayController::class, 'getPaymentStatus']);
 });
+
+// --- Public NotchPay Webhook & Callback (Outside Sanctum auth) ---
+Route::get('/notchpay/callback', [\App\Http\Controllers\NotchPayController::class, 'callback'])->name('notchpay.callback');
+Route::post('/notchpay/webhook', [\App\Http\Controllers\NotchPayController::class, 'webhook'])->name('notchpay.webhook');
+
 

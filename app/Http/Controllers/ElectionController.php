@@ -23,6 +23,11 @@ class ElectionController extends Controller
     public function initiate(Request $request)
     {
         $user = $request->user();
+
+        if ($user->status !== 'validated') {
+            return response()->json(['message' => "Votre profil doit être validé par la CCA pour lancer une élection."], 403);
+        }
+
         $clanTag = $user->current_clan_tag;
 
         if (!$clanTag) {
@@ -51,16 +56,19 @@ class ElectionController extends Controller
         }
 
         // 3. Vérification du rôle (Chef ou Sous-Chef uniquement peuvent lancer l'élection)
-        $cocMember = collect($cocClan['memberList'] ?? [])->firstWhere('tag', $user->tag_coc);
+        $userTag = ltrim(strtoupper($user->tag_coc), '#');
+        $cocMember = collect($cocClan['memberList'] ?? [])->first(function ($member) use ($userTag) {
+            return ltrim(strtoupper($member['tag']), '#') === $userTag;
+        });
         $userRole = $cocMember['role'] ?? null;
         if (!in_array($userRole, ['leader', 'coLeader'])) {
             return response()->json(['message' => "Seuls les Chefs et Sous-Chefs du clan peuvent lancer une élection de capitaine."], 403);
         }
 
         // 4. Vérification de l'éligibilité du lanceur (HDV 14+)
-        if ($user->hdv_level < 14) {
-             return response()->json(['message' => "Vous devez avoir un HDV 14 minimum pour initier une élection."], 403);
-        }
+        // if ($user->hdv_level < 14) {
+        //      return response()->json(['message' => "Vous devez avoir un HDV 14 minimum pour initier une élection."], 403);
+        // }
 
         $election = CaptainElection::create([
             'clan_tag' => $clanTag,
@@ -86,7 +94,7 @@ class ElectionController extends Controller
             return response()->json(['message' => "Cette élection est clôturée."], 422);
         }
 
-        if (!$voter->is_validated) {
+        if ($voter->status!='validated') {
             return response()->json(['message' => "Votre profil doit être validé par CCA pour voter."], 403);
         }
 
@@ -100,7 +108,7 @@ class ElectionController extends Controller
 
         $candidate = User::find($request->candidate_id);
         
-        if ($candidate->current_clan_tag !== $election->clan_tag || !$candidate->is_validated) {
+        if ($candidate->current_clan_tag !== $election->clan_tag || $candidate->status!='validated') {
             return response()->json(['message' => "Ce candidat n'est pas éligible."], 422);
         }
 
@@ -151,13 +159,13 @@ class ElectionController extends Controller
         ]);
 
         // Mise à jour du clan
-        $clan = \App\Models\Clan::where('tag_coc', $election->clan_tag)->first();
-        if ($clan) {
-            $clan->update(['captain_id' => $winnerId]);
-            
-            // On s'assure que le vainqueur a le rôle 'captain'
-            $winner->update(['role' => 'captain']);
-        }
+        // $clan = \App\Models\Clan::where('tag_coc', $election->clan_tag)->first();
+        // if ($clan) {
+        // }
+        // $clan->update(['captain_id' => $winnerId]);
+        
+        // On s'assure que le vainqueur a le rôle 'captain'
+        $winner->update(['role' => 'captain']);
 
         return response()->json([
             'message' => "L'élection est terminée. {$winner->name} est le nouveau capitaine.",

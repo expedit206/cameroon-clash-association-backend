@@ -79,13 +79,17 @@ class ClanController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        if ($user->status !== 'validated') {
+            return response()->json(['message' => "Votre profil doit être validé par la CCA pour accéder aux détails de votre clan."], 403);
+        }
+
         $clanTag = $user->current_clan_tag;
 
-        \Illuminate\Support\Facades\Log::info('[My Clan] Request received', [
-            'user_id'   => $user->id,
-            'user_name' => $user->name,
-            'clan_tag'  => $clanTag,
-        ]);
+        // \Illuminate\Support\Facades\Log::info('[My Clan] Request received', [
+        //     'user_id'   => $user->id,
+        //     'user_name' => $user->name,
+        //     'clan_tag'  => $clanTag,
+        // ]);
 
         if (!$clanTag) {
             return response()->json(['message' => "Tag de clan manquant. Veuillez synchroniser votre profil."], 400);
@@ -94,9 +98,9 @@ class ClanController extends Controller
         // 1. Récupérer les membres via l'API CoC
         $cocMembers = $this->cocApi->getClanMembers($clanTag);
 
-        \Illuminate\Support\Facades\Log::info('[My Clan] CoC members received', [
-            'count' => $cocMembers ? count($cocMembers) : 'null (API failure)'
-        ]);
+        // \Illuminate\Support\Facades\Log::info('[My Clan] CoC members received', [
+        //     'count' => $cocMembers ? count($cocMembers) : 'null (API failure)'
+        // ]);
 
         if ($cocMembers === null) {
             return response()->json(['message' => "Impossible de récupérer les membres du clan depuis l'API CoC."], 500);
@@ -123,9 +127,10 @@ class ClanController extends Controller
                 'id' => $platformUser?->id, // On aplatit l'ID pour faciliter l'accès au vote
                 'tag_coc' => $tag,
                 'name' => $member['name'],
+                'townHallLevel' => $member['townHallLevel'],
                 'role_coc' => $member['role'],
                 'exp_level' => $member['expLevel'],
-                'league_icon' => $member['league']['iconUrls']['small'] ?? null,
+                'league_icon' => $member['leagueTier']['iconUrls']['small'] ?? null,
                 'is_registered' => !!$platformUser,
                 'platform_user' => $platformUser ? [
                     'id' => $platformUser->id,

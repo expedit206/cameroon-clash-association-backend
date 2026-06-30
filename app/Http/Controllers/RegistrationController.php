@@ -17,10 +17,12 @@ use Illuminate\Support\Facades\Validator;
 class RegistrationController extends Controller
 {
     protected CocApiService $cocApi;
+    protected \App\Services\NotchPayService $notchPayService;
 
-    public function __construct(CocApiService $cocApi)
+    public function __construct(CocApiService $cocApi, \App\Services\NotchPayService $notchPayService)
     {
         $this->cocApi = $cocApi;
+        $this->notchPayService = $notchPayService;
     }
 
     /**
@@ -99,7 +101,7 @@ class RegistrationController extends Controller
             'players' => 'required|array|min:5|max:10', // 5 titulaires + jusqu'à 5 remplaçants
             'players.*.tag_coc' => 'required|string',
             'players.*.name' => 'required|string',
-            'players.*.hdv_level' => 'required|integer|between:14,18',
+            'players.*.townHallLevel' => 'required|integer|between:14,18',
             'players.*.is_substitute' => 'required|boolean',
         ]);
 
@@ -128,7 +130,7 @@ class RegistrationController extends Controller
                         'name' => $playerData['name'],
                         'password' => bcrypt('password_default'), // Password temporaire
                         'role' => 'player',
-                        'hdv_level' => $playerData['hdv_level'],
+                        'hdv_level' => $playerData['townHallLevel'],
                         'status' => 'validated', // Validé tacitement car vérifié par le capitaine
                     ]
                 );
@@ -136,7 +138,7 @@ class RegistrationController extends Controller
                 RegistrationPlayer::create([
                     'clan_registration_id' => $registration->id,
                     'player_id' => $player->id,
-                    'hdv_position' => $playerData['hdv_level'],
+                    'hdv_position' => $playerData['townHallLevel'],
                     'is_substitute' => $playerData['is_substitute'],
                     'verified_at' => now(),
                 ]);
@@ -188,9 +190,6 @@ class RegistrationController extends Controller
     public function initiatePayment(Request $request, ClanRegistration $registration)
     {
         $request->validate([
-            'payment_method' => 'required|string',
-            'phone_number' => 'required|string',
-            'transaction_reference' => 'required|string',
             'for_player_tag' => 'nullable|string', // Optional: if someone pays for a teammate
         ]);
 
@@ -216,7 +215,6 @@ class RegistrationController extends Controller
 
         // Règle : Seuls les TITULAIRES paient à l'inscription
         if ($rosterPlayer->is_substitute) {
-            // Sauf s'il y a une substitution en cours ? (A implémenter plus tard dans DuelController/SubstitutionController)
             return response()->json(['message' => "Les remplaçants ne paient pas de frais d'inscription à cette étape."], 422);
         }
 
@@ -230,21 +228,55 @@ class RegistrationController extends Controller
             return response()->json(['message' => "Ce joueur a déjà payé ses frais de participation."], 422);
         }
 
-        // Créer l'entrée dans la table payments (Individuel : 1000 FCFA)
-        \App\Models\Payment::create([
+        // Configuration du paiement NotchPay
+        $reference = 'PAY_' . $registration->id . '_' . $targetUser->id . '_' . time();
+        $amount = 1000;
+        $dummyEmail = str_replace('#', '', $targetUser->tag_coc) . '@cca.espacecameroun.com';
+
+        // Supprimer les anciennes tentatives de paiement en attente
+        \App\Models\Payment::where('clan_registration_id', $registration->id)
+            ->where('user_id', $targetUser->id)
+            ->where('status', 'pending')
+            ->delete();
+
+        // Enregistrer la tentative de paiement localement
+        $payment = \App\Models\Payment::create([
             'clan_registration_id' => $registration->id,
             'user_id' => $targetUser->id,
             'player_tag' => $targetUser->tag_coc,
-            'amount' => 1000, 
+            'amount' => $amount,
             'currency' => 'XAF',
-            'reference' => $request->transaction_reference,
+            'reference' => $reference,
             'status' => 'pending',
-            'payment_method' => $request->payment_method,
-            'phone_number' => $request->phone_number,
+            'payment_method' => 'momo',
+            'phone_number' => $targetUser->phone_whatsapp ?? '',
         ]);
 
-        return response()->json([
-            'message' => "Paiement de 1 000 FCFA soumis pour " . $targetUser->name . ". En attente de validation."
-        ]);
+        try {
+            $notchPayment = $this->notchPayService->initializePayment([
+                'amount' => $amount,
+                'email' => $dummyEmail,
+                'reference' => $reference,
+                'description' => "Frais de participation de " . $targetUser->name . " (" . $targetUser->tag_coc . ")",
+                'metadata' => [
+                    'payment_id' => $payment->id,
+                    'registration_id' => $registration->id,
+                    'user_id' => $targetUser->id,
+                ],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'redirect_url' => $notchPayment->authorization_url,
+                'reference' => $reference,
+                'message' => 'Paiement initialisé avec succès.'
+            ]);
+        } catch (\Exception $e) {
+            $payment->delete();
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'initialisation du paiement NotchPay : ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

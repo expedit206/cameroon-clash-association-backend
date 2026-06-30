@@ -19,7 +19,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => explode(',', env('ALLOWED_ORIGINS', 'https://cca.espacecameroun.com')),
+    'allowed_origins' => array_filter(array_map('trim', explode(',', env('ALLOWED_ORIGINS', 'https://cca.espacecameroun.com,http://localhost:3000,http://localhost:3001')))),
 
     'allowed_origins_patterns' => [],
 
