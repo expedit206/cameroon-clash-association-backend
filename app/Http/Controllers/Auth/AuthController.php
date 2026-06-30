@@ -34,7 +34,7 @@ class AuthController extends Controller
             'tag_coc' => 'required|string|unique:users,tag_coc',
             'password' => 'required|string|min:8|confirmed',
             'phone_whatsapp' => 'required|string',
-            'screenshot_proof' => 'required|image|max:2048', // Max 2Mo
+            'screenshot_proof' => 'required|image', // Max 2Mo
         ]);
 
         if ($validator->fails()) {
@@ -93,7 +93,7 @@ class AuthController extends Controller
         // Normalisation EXTREME du tag
         $inputTag = trim($request->tag_coc);
         $normalizedTag = strtoupper(str_replace('#', '', $inputTag));
-        
+
         \Illuminate\Support\Facades\Log::info('[Auth] Login attempt', [
             'input' => $inputTag,
             'normalized' => $normalizedTag
@@ -142,7 +142,7 @@ class AuthController extends Controller
                 // Synchroniser le vrai clan et les stats du joueur depuis l'API officielle
                 // Ceci permet d'éviter que le joueur reste rattaché à un ancien clan s'il l'a quitté en jeu
                 $clanTag = $cocPlayer['clan']['tag'] ?? null;
-                
+
                 $user->update([
                     'name'             => $cocPlayer['name'] ?? $user->name,
                     'hdv_level'        => $cocPlayer['townHallLevel'] ?? $user->hdv_level,
@@ -171,7 +171,7 @@ class AuthController extends Controller
 
         try {
             $cocPlayer = $this->cocApi->getPlayer($user->tag_coc);
-            
+
             if (!$cocPlayer) {
                 return response()->json(['message' => 'Impossible de récupérer les données CoC.'], 422);
             }
