@@ -147,7 +147,7 @@ class AuthController extends Controller
                     'name'             => $cocPlayer['name'] ?? $user->name,
                     'hdv_level'        => $cocPlayer['townHallLevel'] ?? $user->hdv_level,
                     'current_clan_tag' => $clanTag,
-                    'league_icon'      => $cocPlayer['league']['iconUrls']['small'] ?? $user->league_icon,
+                    'league_icon'      => $cocPlayer['leagueTier']['iconUrls']['small'] ?? $user->league_icon,
                     'exp_level'        => $cocPlayer['expLevel'] ?? $user->exp_level,
                 ]);
             }
@@ -180,7 +180,7 @@ class AuthController extends Controller
                 'name'             => $cocPlayer['name'] ?? $user->name,
                 'hdv_level'        => $cocPlayer['townHallLevel'] ?? $user->hdv_level,
                 'current_clan_tag' => $cocPlayer['clan']['tag'] ?? $user->current_clan_tag,
-                'league_icon'      => $cocPlayer['league']['iconUrls']['small'] ?? $user->league_icon,
+                'league_icon'      => $cocPlayer['leagueTier']['iconUrls']['small'] ?? $user->league_icon,
                 'exp_level'        => $cocPlayer['expLevel'] ?? $user->exp_level,
             ]);
 

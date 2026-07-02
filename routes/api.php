@@ -40,10 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/registrations/{registration}/pay', [\App\Http\Controllers\RegistrationController::class, 'initiatePayment']);
     });
     
-    Route::get('/elections/current', [\App\Http\Controllers\ElectionController::class, 'current']);
-    Route::post('/elections/initiate', [\App\Http\Controllers\ElectionController::class, 'initiate']);
-    Route::post('/elections/{election}/vote', [\App\Http\Controllers\ElectionController::class, 'vote']);
-    Route::post('/elections/{election}/declare-winner', [\App\Http\Controllers\ElectionController::class, 'declareWinner']);
+
 
     // --- Inscriptions & Equipes ---
     Route::get('/competitions/{competition}/registration/status', [\App\Http\Controllers\RegistrationController::class, 'status']);

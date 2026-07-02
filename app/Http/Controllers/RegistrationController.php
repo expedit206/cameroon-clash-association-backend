@@ -56,45 +56,9 @@ class RegistrationController extends Controller
     {
         $user = $request->user();
         $clan = $user->capitained_clan;
-        $clanTag = $user->current_clan_tag;
 
-        // Si le clan n'est pas dans la BD, on vérifie s'il y a une élection gagnée
         if (!$clan) {
-            $election = \App\Models\CaptainElection::where('clan_tag', $clanTag)
-                ->where('competition_id', $competition->id)
-                ->where('winner_id', $user->id)
-                ->where('status', 'closed')
-                ->first();
-
-            if (!$election) {
-                return response()->json(['message' => "Seul le capitaine élu par le clan peut soumettre le roster."], 403);
-            }
-
-            // Création JIT du clan
-            $cocClan = $this->cocApi->getClan($clanTag);
-            $clan = \App\Models\Clan::create([
-                'tag_coc' => strtoupper($clanTag),
-                'name' => $cocClan['name'] ?? 'Clan Inconnu',
-                'captain_id' => $user->id,
-                'badge_url' => $cocClan['badgeUrls']['medium'] ?? null,
-                'clan_level' => $cocClan['clanLevel'] ?? 1,
-                'status' => 'pending', // Validation finale par l'admin lors du roster
-            ]);
-            
-            // Mettre à jour le rôle de l'user
-            $user->update(['role' => 'captain']);
-        }
-
-        // Si on est ici, soit le clan existait, soit il vient d'être créé.
-        // On vérifie une dernière fois si l'user est bien le vainqueur de l'élection
-        $election = \App\Models\CaptainElection::where('clan_tag', $clan->tag_coc)
-            ->where('competition_id', $competition->id)
-            ->where('winner_id', $user->id)
-            ->where('status', 'closed')
-            ->first();
-
-        if (!$election) {
-            return response()->json(['message' => "Seul le capitaine élu pour ce tournoi peut soumettre le roster."], 403);
+            return response()->json(['message' => "Seul le capitaine désigné de ce clan peut soumettre le roster."], 403);
         }
 
         $validator = Validator::make($request->all(), [
@@ -107,6 +71,26 @@ class RegistrationController extends Controller
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $players = $request->input('players', []);
+        $starters = array_filter($players, function ($p) {
+            return !($p['is_substitute'] ?? false);
+        });
+
+        if (count($starters) !== 5) {
+            return response()->json(['message' => "Le roster principal doit contenir exactement 5 joueurs titulaires."], 422);
+        }
+
+        $hdvPositions = array_map(function ($p) {
+            return intval($p['townHallLevel'] ?? 0);
+        }, $starters);
+
+        sort($hdvPositions);
+        $requiredLevels = [14, 15, 16, 17, 18];
+
+        if ($hdvPositions !== $requiredLevels) {
+            return response()->json(['message' => "Le roster principal doit comporter exactement un joueur de chaque niveau d'HDV de 14 à 18 (un HDV 14, un HDV 15, un HDV 16, un HDV 17 et un HDV 18)."], 422);
         }
 
         return DB::transaction(function () use ($request, $competition, $clan) {
@@ -231,7 +215,7 @@ class RegistrationController extends Controller
         // Configuration du paiement NotchPay
         $reference = 'PAY_' . $registration->id . '_' . $targetUser->id . '_' . time();
         $amount = 1000;
-        $dummyEmail = str_replace('#', '', $targetUser->tag_coc) . '@cca.espacecameroun.com';
+        $dummyEmail = str_replace('#', '', $targetUser->tag_coc) . '@clashkamer.com';
 
         // Supprimer les anciennes tentatives de paiement en attente
         \App\Models\Payment::where('clan_registration_id', $registration->id)
