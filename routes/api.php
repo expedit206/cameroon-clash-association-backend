@@ -52,9 +52,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/stats', [\App\Http\Controllers\Admin\AdminUserController::class, 'stats']);
 
         // Moderation Joueurs
+        Route::get('/admin/users', [\App\Http\Controllers\Admin\AdminUserController::class, 'index']);
         Route::get('/admin/users/pending', [\App\Http\Controllers\Admin\AdminUserController::class, 'pendingUsers']);
         Route::put('/admin/users/{user}/validate', [\App\Http\Controllers\Admin\AdminUserController::class, 'validateUser']);
         Route::put('/admin/users/{user}/reject', [\App\Http\Controllers\Admin\AdminUserController::class, 'rejectUser']);
+        Route::delete('/admin/users/{user}', [\App\Http\Controllers\Admin\AdminUserController::class, 'destroy']);
+        Route::put('/admin/users/{user}/make-captain', [\App\Http\Controllers\Admin\AdminUserController::class, 'makeCaptain']);
+        Route::get('/admin/clans/{tag_coc}/members', [\App\Http\Controllers\Admin\AdminUserController::class, 'clanMembers']);
         
         // Moderation Clans
         Route::get('/admin/clans/pending', [\App\Http\Controllers\Admin\AdminClanController::class, 'pendingClans']);

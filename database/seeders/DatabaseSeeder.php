@@ -31,7 +31,7 @@ class DatabaseSeeder extends Seeder
             'season_number' => 1,
             'format' => 'elimination_directe',
             'max_teams' => 16,
-            'registration_fee' => 5000,
+            'registration_fee' => 0,
             'status' => 'open', // Inscriptions ouvertes
             'registration_opens_at' => now(),
             'registration_closes_at' => now()->addMonths(1),
