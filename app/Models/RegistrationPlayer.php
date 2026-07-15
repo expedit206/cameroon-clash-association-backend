@@ -5,6 +5,19 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Modèle RegistrationPlayer.
+ * 
+ * Représente un joueur (titulaire ou remplaçant) composant le roster d'un clan inscrit à un tournoi.
+ * Contient la position d'HDV (entre 14 et 18) et si le joueur sert de remplaçant.
+ * 
+ * @property int $id
+ * @property int $clan_registration_id ID de la relation d'inscription du clan.
+ * @property int $player_id ID de l'utilisateur joueur.
+ * @property int $hdv_position Niveau d'HDV assigné pour le roster (14 à 18).
+ * @property bool $is_substitute Si le joueur est sur le banc / remplaçant.
+ * @property \Carbon\Carbon|null $verified_at Date de vérification de l'éligibilité.
+ */
 class RegistrationPlayer extends Model
 {
     use HasFactory;

@@ -36,6 +36,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Actions restreintes (Profil vérifié requis) ---
     Route::middleware('verified_profile')->group(function () {
         Route::post('/clans/submit', [\App\Http\Controllers\ClanController::class, 'submit']);
+        Route::post('/competitions/{competition}/pre-register', [\App\Http\Controllers\RegistrationController::class, 'preRegister']);
         Route::post('/competitions/{competition}/register-team', [\App\Http\Controllers\RegistrationController::class, 'registerTeam']);
         Route::post('/registrations/{registration}/pay', [\App\Http\Controllers\RegistrationController::class, 'initiatePayment']);
     });
@@ -50,6 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('can:admin')->group(function () {
         // Dashboard Stats
         Route::get('/admin/stats', [\App\Http\Controllers\Admin\AdminUserController::class, 'stats']);
+        Route::post('/admin/sync-coc-data', [\App\Http\Controllers\Admin\AdminUserController::class, 'syncCocData']);
 
         // Moderation Joueurs
         Route::get('/admin/users', [\App\Http\Controllers\Admin\AdminUserController::class, 'index']);

@@ -25,6 +25,21 @@ class AdminUserController extends Controller
             'total_payments' => \App\Models\Payment::where('status', 'completed')->sum('amount'),
         ]);
     }
+
+    /**
+     * Déclenche manuellement la synchronisation CoC de tous les joueurs.
+     */
+    public function syncCocData()
+    {
+        try {
+            \Artisan::queue('coc:sync-users --chunk=30');
+            return response()->json([
+                'message' => 'Synchronisation CoC lancée en arrière-plan. Les données seront mises à jour sous quelques minutes.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors du lancement de la synchronisation : ' . $e->getMessage()], 500);
+        }
+    }
     /**
      * Liste des joueurs en attente de validation.
      */
@@ -106,19 +121,7 @@ class AdminUserController extends Controller
      */
     public function index(Request $request)
     {
-        $query = User::with('current_clan')->where('role', '!=', 'admin');
-
-        // Recherche par tag, nom ou clan
-        if ($search = $request->input('search')) {
-            $query->where(function($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('tag_coc', 'like', "%{$search}%")
-                  ->orWhere('current_clan_tag', 'like', "%{$search}%")
-                  ->orWhereHas('current_clan', function($clanQ) use ($search) {
-                      $clanQ->where('name', 'like', "%{$search}%");
-                  });
-            });
-        }
+        $query = User::where('role', '!=', 'admin');
 
         // Filtrage par statut
         if ($status = $request->input('status')) {
@@ -128,6 +131,42 @@ class AdminUserController extends Controller
         }
 
         $users = $query->orderBy('created_at', 'desc')->get();
+
+        // Charger à la volée le clan réel depuis l'API CoC en interrogeant le profil du joueur
+        $cocApi = app(\App\Services\CocApiService::class);
+
+        $users->transform(function($user) use ($cocApi) {
+            $cleanTag = str_replace('#', '', $user->tag_coc);
+            
+            // On cache le profil joueur pendant 15 minutes pour préserver les performances
+            $playerInfo = \Illuminate\Support\Facades\Cache::remember("coc_player_profile_{$cleanTag}", 900, function() use ($cocApi, $user) {
+                return $cocApi->getPlayer($user->tag_coc);
+            });
+
+            if ($playerInfo && isset($playerInfo['clan'])) {
+                $user->current_clan_info = [
+                    'name' => $playerInfo['clan']['name'],
+                    'badge_url' => $playerInfo['clan']['badgeUrls']['small'] ?? $playerInfo['clan']['badgeUrls']['medium'] ?? null,
+                    'tag_coc' => $playerInfo['clan']['tag']
+                ];
+            } else {
+                $user->current_clan_info = null;
+            }
+            return $user;
+        });
+
+        // Filtrage par recherche (nom, tag, clan tag ou nom de clan)
+        if ($search = $request->input('search')) {
+            $searchLower = strtolower($search);
+            $users = $users->filter(function($user) use ($searchLower) {
+                $nameMatch = str_contains(strtolower($user->name), $searchLower);
+                $tagMatch = str_contains(strtolower($user->tag_coc), $searchLower);
+                $clanTagMatch = $user->current_clan_tag && str_contains(strtolower($user->current_clan_tag), $searchLower);
+                $clanNameMatch = $user->current_clan_info && str_contains(strtolower($user->current_clan_info['name']), $searchLower);
+                
+                return $nameMatch || $tagMatch || $clanTagMatch || $clanNameMatch;
+            })->values();
+        }
 
         return response()->json($users);
     }

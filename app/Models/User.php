@@ -11,6 +11,26 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 // use 
+/**
+ * Modèle User.
+ * 
+ * Représente un joueur ou un administrateur sur la plateforme.
+ * Contient les informations de profil CoC (HDV, niveau, clan) et de plateforme (rôle, validation).
+ * 
+ * @property int $id
+ * @property string $tag_coc Tag Clash of Clans unique (#XXXXX).
+ * @property string $name Nom d'utilisateur (ou pseudo Clash of Clans).
+ * @property string $password Mot de passe de connexion.
+ * @property string $role Rôle de l'utilisateur ('admin', 'player', 'captain').
+ * @property int $hdv_level Niveau de l'Hôtel de Ville (Town Hall) (entre 14 et 18 pour l'éligibilité).
+ * @property string|null $current_clan_tag Tag du clan lié dans la base de données.
+ * @property string|null $phone_whatsapp Numéro de téléphone WhatsApp pour les communications et paiements.
+ * @property bool $is_active Si le compte est actif.
+ * @property string $status Statut d'approbation administrative ('pending', 'validated', 'rejected').
+ * @property string|null $screenshot_proof Chemin de la preuve de profil fournie à la création.
+ * @property string|null $league_icon Image de la ligue Clash of Clans.
+ * @property int|null $exp_level Niveau d'expérience du joueur.
+ */
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */

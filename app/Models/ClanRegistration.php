@@ -5,6 +5,24 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Modèle ClanRegistration.
+ * 
+ * Représente l'inscription d'un clan à une édition de compétition (tournoi).
+ * Suit l'état de l'inscription (attente paiement, validée par l'admin, disqualifiée),
+ * la référence du paiement NotchPay global, ainsi que la date de validation.
+ * 
+ * @property int $id
+ * @property int $clan_id Clan inscrit.
+ * @property int $competition_id Compétition concernée.
+ * @property string $status Statut de l'inscription ('pending_payment', 'paid', 'confirmed', 'disqualified').
+ * @property int|null $seed_number seed/place dans le bracket final (1 à 16).
+ * @property \Carbon\Carbon|null $paid_at Date de confirmation du paiement en base.
+ * @property int|null $confirmed_by ID de l'administrateur ayant vérifié/confirmé l'inscription.
+ * @property \Carbon\Carbon|null $confirmed_at Date de confirmation administrative.
+ * @property string|null $payment_reference Référence du paiement global NotchPay/MeSomb.
+ * @property \Carbon\Carbon|null $registered_at Date d'inscription complète finale.
+ */
 class ClanRegistration extends Model
 {
     use HasFactory;

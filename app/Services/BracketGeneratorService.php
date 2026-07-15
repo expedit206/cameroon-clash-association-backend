@@ -50,7 +50,7 @@ class BracketGeneratorService
                     'match_number' => $index + 1,
                     'clan_home_id' => $reg1->clan_id,
                     'clan_away_id' => $reg2->clan_id,
-                    'host_clan_id' => $reg1->clan_id, // Par défaut le mieux seedé reçoit
+                    // 'host_clan_id' => $reg1->clan_id, // Par défaut le mieux seedé reçoit
                     'status' => 'scheduled',
                     'scheduled_at' => now()->addDays(2), // Exemple
                 ]);
@@ -63,9 +63,10 @@ class BracketGeneratorService
     /**
      * Fait progresser le tournoi vers le round suivant si tous les matches du round actuel sont finis.
      */
-    public function advanceTournament(Competition $competition, $currentRound)
+    public function advanceTournament(Competition $competition, int $currentRound)
     {
         return DB::transaction(function () use ($competition, $currentRound) {
+            $currentRound = (int) $currentRound;
             $nextRound = $currentRound + 1;
             if ($nextRound > 4) return false; // Tournoi fini
 

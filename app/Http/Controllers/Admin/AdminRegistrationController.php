@@ -16,7 +16,7 @@ class AdminRegistrationController extends Controller
      */
     public function index()
     {
-        $registrations = ClanRegistration::with(['clan', 'players.user', 'payment'])
+        $registrations = ClanRegistration::with(['clan', 'players.user'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -47,14 +47,6 @@ class AdminRegistrationController extends Controller
             'confirmed_at' => now(),
             'seed_number' => $confirmedCount + 1,
         ]);
-
-        if ($registration->payment) {
-            $registration->payment->update([
-                'status' => 'completed',
-                'confirmed_by' => $request->user()->id,
-                'confirmed_at' => now(),
-            ]);
-        }
 
         return response()->json(['message' => "Inscription confirmée !"]);
     }

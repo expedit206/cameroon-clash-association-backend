@@ -6,6 +6,7 @@ use App\Models\ClanRegistration;
 use App\Models\Competition;
 use App\Models\RegistrationPlayer;
 use App\Models\User;
+use App\Models\Clan;
 use App\Services\CocApiService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,69 @@ class RegistrationController extends Controller
         // Pour l'instant, on retourne la liste brute. En V2, on vérifiera si le tag est déjà dans registration_players.
 
         return response()->json($members);
+    }
+
+    /**
+     * Pré-enregistrer le clan à la compétition dès la validation de l'éligibilité.
+     * 
+     * Appelé lorsque le capitaine valide l'éligibilité de son clan (étape 0 du parcours).
+     * Crée la ligne dans clan_registrations avec le statut 'pending' et met à jour
+     * le captain_id du clan pour garantir que le capitaine est always connu.
+     */
+    public function preRegister(Request $request, Competition $competition)
+    {
+        $user = $request->user();
+
+        // L'utilisateur qui clique sur ce bouton doit déjà être capitaine ou admin
+        if ($user->role !== 'captain' && $user->role !== 'admin') {
+            return response()->json(['message' => "Seul le capitaine ou un administrateur désigné peut enregistrer le clan."], 403);
+        }
+
+        if (!$user->current_clan_tag) {
+            return response()->json(['message' => "Vous n'avez aucun clan Clash of Clans associé à votre compte. Veuillez d'abord synchroniser votre profil."], 422);
+        }
+
+        $clanTag = strtoupper(trim($user->current_clan_tag));
+        $clan = Clan::where('tag_coc', $clanTag)->first();
+
+        // Récupérer les détails depuis l'API Clash of Clans pour initialiser fidèlement le clan si nécessaire
+        $cocClan = $this->cocApi->getClan($clanTag);
+        if (!$cocClan) {
+            return response()->json(['message' => "Le clan associé à votre compte ({$clanTag}) est introuvable sur Clash of Clans."], 422);
+        }
+
+        if (!$clan) {
+            // Créer le clan directement en statut validé puisque le profil du capitaine est validé
+            $clan = Clan::create([
+                'tag_coc' => $clanTag,
+                'name' => $cocClan['name'] ?? 'Clan',
+                'captain_id' => $user->id,
+                'badge_url' => $cocClan['badgeUrls']['medium'] ?? null,
+                'clan_level' => $cocClan['clanLevel'] ?? null,
+                'status' => 'validated',
+            ]);
+        } else {
+            // S'assurer que l'utilisateur est le capitaine assigné et que le statut est validé
+            $clan->captain_id = $user->id;
+            $clan->status = 'validated';
+            $clan->save();
+        }
+
+        // Créer ou récupérer l'enregistrement du tournoi
+        $registration = ClanRegistration::firstOrCreate(
+            [
+                'clan_id' => $clan->id,
+                'competition_id' => $competition->id,
+            ],
+            [
+                'status' => 'pending_payment',
+            ]
+        );
+
+        return response()->json([
+            'message' => 'Clan pré-enregistré et validé avec succès. Vous pouvez composer votre roster.',
+            'registration' => $registration->load('clan.captain'),
+        ]);
     }
 
     /**
@@ -99,15 +163,22 @@ class RegistrationController extends Controller
                 'clan_id' => $clan->id,
                 'competition_id' => $competition->id,
             ], [
-                'status' => 'pending_payment',
+                'status' => $competition->registration_fee > 0 ? 'pending_payment' : 'confirmed',
             ]);
+
+            // Si c'est gratuit, on s'assure que le statut est mis à jour et validé
+            if ($competition->registration_fee <= 0) {
+                $registration->status = 'confirmed';
+                $registration->registered_at = now();
+                $registration->save();
+            }
 
             // 2. Nettoyer la composition précédente si elle existe
             $registration->players()->delete();
 
             // 3. Ajouter les joueurs
             foreach ($request->players as $playerData) {
-                // On cherche l'utilisateur par son tag, ou on en crée un "fantôme" si pas encore inscrit(si le joueur n'est pas encore inscrit dans notre plateforme on refusera son appartenance a une equipe)
+                // On cherche l'utilisateur par son tag, ou on en crée un "fantôme" si pas encore inscrit
                 $player = User::firstOrCreate(
                     ['tag_coc' => strtoupper($playerData['tag_coc'])],
                     [
@@ -128,8 +199,10 @@ class RegistrationController extends Controller
                 ]);
             }
 
+            $message ="Composition d'équipe enregistrée. Inscription validée !";
+
             return response()->json([
-                'message' => "Composition d'équipe enregistrée. Passez maintenant au paiement.",
+                'message' => $message,
                 'registration' => $registration->load('players.user')
             ]);
         });
@@ -162,10 +235,13 @@ class RegistrationController extends Controller
         }
 
         if (!$registration) {
-            return response()->json(['message' => 'Aucune inscription trouvée pour votre clan dans cette compétition.'], 404);
+            return response()->json([
+                'registration' => null,
+                'message' => 'Aucune inscription active pour ce tournoi.'
+            ]);
         }
 
-        return response()->json($registration->load(['players.user', 'payments', 'clan']));
+        return response()->json($registration->load(['players.user', 'payments', 'clan.captain']));
     }
 
     /**

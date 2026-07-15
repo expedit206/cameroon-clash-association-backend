@@ -36,13 +36,30 @@ class TournamentController extends Controller
     {
         // On récupère tous les matches organisés par round
         // Rounds : 1 (8èmes), 2 (Quarts), 3 (Demis), 4 (Finale)
-        $matches = TournamentMatch::with(['clan1', 'clan2'])
+        $matches = TournamentMatch::with(['clanHome', 'clanAway'])
             ->orderBy('round')
             ->orderBy('match_number')
-            ->get()
-            ->groupBy('round');
+            ->get();
 
-        return response()->json($matches);
+        $mapped = [
+            'r16' => [],
+            'r8' => [],
+            'r4' => [],
+            'r2' => []
+        ];
+
+        foreach ($matches as $match) {
+            $roundKey = match ((int) $match->round) {
+                1 => 'r16',
+                2 => 'r8',
+                3 => 'r4',
+                4 => 'r2',
+                default => 'r16',
+            };
+            $mapped[$roundKey][] = $match;
+        }
+
+        return response()->json($mapped);
     }
 
     /**
