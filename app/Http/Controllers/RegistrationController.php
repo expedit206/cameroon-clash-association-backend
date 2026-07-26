@@ -125,6 +125,12 @@ class RegistrationController extends Controller
             return response()->json(['message' => "Seul le capitaine désigné de ce clan peut soumettre le roster."], 403);
         }
 
+        // Vérifier si des brackets ont déjà été générés
+        $hasMatches = \App\Models\TournamentMatch::where('competition_id', $competition->id)->exists();
+        if ($hasMatches) {
+            return response()->json(['message' => "Le roster ne peut plus être modifié car les brackets du tournoi ont déjà été générés."], 422);
+        }
+
         $validator = Validator::make($request->all(), [
             'players' => 'required|array|min:5|max:10', // 5 titulaires + jusqu'à 5 remplaçants
             'players.*.tag_coc' => 'required|string',
@@ -241,7 +247,12 @@ class RegistrationController extends Controller
             ]);
         }
 
-        return response()->json($registration->load(['players.user', 'payments', 'clan.captain']));
+        $registration->load(['players.user', 'payments', 'clan.captain']);
+        $bracketsGenerated = \App\Models\TournamentMatch::where('competition_id', $competition->id)->exists();
+
+        return response()->json(array_merge($registration->toArray(), [
+            'brackets_generated' => $bracketsGenerated
+        ]));
     }
 
     /**
