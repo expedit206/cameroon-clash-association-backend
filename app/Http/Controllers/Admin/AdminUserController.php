@@ -82,6 +82,24 @@ class AdminUserController extends Controller
     }
 
     /**
+     * Réinitialiser le mot de passe d'un utilisateur depuis l'admin.
+     */
+    public function resetPassword(Request $request, User $user)
+    {
+        $request->validate([
+            'new_password' => 'required|string|min:8'
+        ]);
+
+        $user->update([
+            'password' => \Illuminate\Support\Facades\Hash::make($request->new_password)
+        ]);
+
+        return response()->json([
+            'message' => "Le mot de passe de {$user->name} a été réinitialisé avec succès."
+        ]);
+    }
+
+    /**
      * Confirmer une inscription (après vérification du paiement).
      */
     public function confirmRegistration(Request $request, \App\Models\ClanRegistration $registration)

@@ -83,4 +83,12 @@ class TournamentController extends Controller
 
         return response()->json($clans);
     }
+
+    /**
+     * Récupère le classement des 2 groupes (A et B).
+     */
+    public function getGroups(\App\Services\GroupStageService $service)
+    {
+        return response()->json($service->getGroupStandings(1));
+    }
 }

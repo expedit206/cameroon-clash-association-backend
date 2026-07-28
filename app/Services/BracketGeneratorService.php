@@ -63,8 +63,12 @@ class BracketGeneratorService
     /**
      * Fait progresser le tournoi vers le round suivant si tous les matches du round actuel sont finis.
      */
-    public function advanceTournament(Competition $competition, int $currentRound)
+    public function advanceTournament(Competition $competition, ?int $currentRound)
     {
+        if (!$currentRound || $currentRound <= 0) {
+            return false;
+        }
+
         return DB::transaction(function () use ($competition, $currentRound) {
             $currentRound = (int) $currentRound;
             $nextRound = $currentRound + 1;
@@ -77,17 +81,24 @@ class BracketGeneratorService
                 ->get();
 
             // Vérifier s'ils sont tous complétés
-            if ($matches->where('status', '!=', 'completed')->count() > 0) {
+            if ($matches->count() === 0 || $matches->where('status', '!=', 'completed')->count() > 0) {
                 return false; // Pas encore prêt
             }
 
             // 2. Créer les matches du round suivant (Pairage 1-2, 3-4...)
-            $winners = $matches->pluck('winner_clan_id');
-            $nextMatchCount = $matches->count() / 2;
+            $winners = $matches->pluck('winner_clan_id')->values();
+            $nextMatchCount = (int) floor($matches->count() / 2);
 
             for ($i = 0; $i < $nextMatchCount; $i++) {
-                $clan1Id = $winners[$i * 2];
-                $clan2Id = $winners[$i * 2 + 1];
+                $idx1 = $i * 2;
+                $idx2 = $i * 2 + 1;
+
+                if (!$winners->has($idx1) || !$winners->has($idx2)) {
+                    continue;
+                }
+
+                $clan1Id = $winners->get($idx1);
+                $clan2Id = $winners->get($idx2);
 
                 TournamentMatch::firstOrCreate([
                     'competition_id' => $competition->id,

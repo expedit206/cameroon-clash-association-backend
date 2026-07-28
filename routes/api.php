@@ -18,6 +18,7 @@ Route::get('/login', function () {
 Route::get('/tournament/leaderboard', [\App\Http\Controllers\TournamentController::class, 'getLeaderboard']);
 Route::get('/tournament/bracket', [\App\Http\Controllers\TournamentController::class, 'getBracket']);
 Route::get('/tournament/clans', [\App\Http\Controllers\TournamentController::class, 'getClans']);
+Route::get('/tournament/groups', [\App\Http\Controllers\TournamentController::class, 'getGroups']);
 
 // --- Découverte des Clans & Joueurs ---
 Route::get('/clans/cameroun', [ClanDiscoveryController::class, 'searchCamerounClans']);
@@ -58,14 +59,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/users/pending', [\App\Http\Controllers\Admin\AdminUserController::class, 'pendingUsers']);
         Route::put('/admin/users/{user}/validate', [\App\Http\Controllers\Admin\AdminUserController::class, 'validateUser']);
         Route::put('/admin/users/{user}/reject', [\App\Http\Controllers\Admin\AdminUserController::class, 'rejectUser']);
+        Route::put('/admin/users/{user}/reset-password', [\App\Http\Controllers\Admin\AdminUserController::class, 'resetPassword']);
         Route::delete('/admin/users/{user}', [\App\Http\Controllers\Admin\AdminUserController::class, 'destroy']);
         Route::put('/admin/users/{user}/make-captain', [\App\Http\Controllers\Admin\AdminUserController::class, 'makeCaptain']);
         Route::get('/admin/clans/{tag_coc}/members', [\App\Http\Controllers\Admin\AdminUserController::class, 'clanMembers']);
         
         // Moderation Clans
+        Route::get('/admin/clans', [\App\Http\Controllers\Admin\AdminClanController::class, 'index']);
         Route::get('/admin/clans/pending', [\App\Http\Controllers\Admin\AdminClanController::class, 'pendingClans']);
         Route::put('/admin/clans/{clan}/validate', [\App\Http\Controllers\Admin\AdminClanController::class, 'validateClan']);
         Route::put('/admin/clans/{clan}/reject', [\App\Http\Controllers\Admin\AdminClanController::class, 'rejectClan']);
+        Route::delete('/admin/clans/{clan}', [\App\Http\Controllers\Admin\AdminClanController::class, 'destroy']);
+        Route::put('/admin/clans/{clan}/captain', [\App\Http\Controllers\Admin\AdminClanController::class, 'updateCaptain']);
+        Route::put('/admin/clans/{clan}/roster', [\App\Http\Controllers\Admin\AdminClanController::class, 'updateRoster']);
+        Route::post('/admin/clans/{clan}/roster/add', [\App\Http\Controllers\Admin\AdminClanController::class, 'addRosterPlayer']);
+        Route::delete('/admin/clans/{clan}/roster/{registrationPlayer}', [\App\Http\Controllers\Admin\AdminClanController::class, 'removeRosterPlayer']);
+        Route::get('/admin/clans/{clan}/available-players', [\App\Http\Controllers\Admin\AdminClanController::class, 'availablePlayers']);
 
         // Inscriptions & Paiements
         Route::get('/admin/registrations', [\App\Http\Controllers\Admin\AdminRegistrationController::class, 'index']);
@@ -75,6 +84,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/competitions/{competition}/matches', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'matches']);
         Route::post('/admin/competitions/{competition}/generate-bracket', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateBracket']);
         Route::put('/admin/matches/{match}', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'updateMatch']);
+        Route::delete('/admin/matches/{match}', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'deleteMatch']);
+        Route::get('/admin/competitions/{competition}/confirmed-clans', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'confirmedClans']);
+        Route::post('/admin/competitions/{competition}/assign-group', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'assignGroup']);
+        Route::post('/admin/competitions/{competition}/create-match', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'createMatch']);
+        Route::get('/admin/competitions/{competition}/group-standings', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'groupStandings']);
+        Route::post('/admin/competitions/{competition}/generate-group-matches', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateGroupMatches']);
     });
 
     // --- Suivi des Paiements Utilisateur ---

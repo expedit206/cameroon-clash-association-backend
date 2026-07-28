@@ -32,6 +32,7 @@ class ClanRegistration extends Model
         'competition_id',
         'status',
         'seed_number',
+        'group',
         'paid_at',
         'confirmed_by',
         'confirmed_at',
