@@ -16,8 +16,9 @@ class AdminTournamentController extends Controller
     {
         $matches = \App\Models\TournamentMatch::where('competition_id', $competition->id)
             ->with(['clanHome', 'clanAway', 'duels'])
-            ->orderBy('round')
-            ->orderBy('match_number')
+            ->orderByRaw('CASE WHEN scheduled_at IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('scheduled_at', 'asc')
+            ->orderBy('match_number', 'asc')
             ->get();
 
         return response()->json($matches);
@@ -38,14 +39,24 @@ class AdminTournamentController extends Controller
     public function updateMatch(Request $request, \App\Models\TournamentMatch $match)
     {
         $request->validate([
-            'total_stars_home' => 'required|integer|min:0|max:15',
-            'total_stars_away' => 'required|integer|min:0|max:15',
+            'total_stars_home' => 'nullable|integer|min:0|max:15',
+            'total_stars_away' => 'nullable|integer|min:0|max:15',
             'total_destruction_home' => 'nullable|numeric|min:0|max:100',
             'total_destruction_away' => 'nullable|numeric|min:0|max:100',
-            'status' => 'required|string|in:scheduled,in_progress,completed,forfeit',
+            'status' => 'nullable|string|in:scheduled,in_progress,completed,forfeit',
+            'scheduled_at' => 'nullable|date',
         ]);
 
-        $match->update($request->all());
+        $match->update($request->only([
+            'total_stars_home',
+            'total_stars_away',
+            'total_destruction_home',
+            'total_destruction_away',
+            'status',
+            'scheduled_at',
+            'round',
+            'match_number',
+        ]));
 
         // Logique auto pour le vainqueur si complété
         if ($match->status === 'completed') {
@@ -72,7 +83,7 @@ class AdminTournamentController extends Controller
             }
         }
 
-        return response()->json(['message' => 'Match mis à jour.', 'match' => $match->load(['clanHome', 'clanAway'])]);
+        return response()->json(['message' => 'Match mis à jour avec succès.', 'match' => $match->load(['clanHome', 'clanAway'])]);
     }
 
     public function confirmedClans(Competition $competition)
@@ -161,6 +172,7 @@ class AdminTournamentController extends Controller
             ->where('competition_id', $competition->id)
             ->where('status', 'confirmed')
             ->whereIn('group', ['A', 'B'])
+            ->orderBy('updated_at', 'asc')
             ->get()
             ->groupBy('group');
 
@@ -168,8 +180,7 @@ class AdminTournamentController extends Controller
             return response()->json(['message' => 'Aucun clan assigné à un groupe. Effectuez d\'abord le tirage au sort.'], 422);
         }
 
-        $created = 0;
-        $matchNumber = \App\Models\TournamentMatch::where('competition_id', $competition->id)->max('match_number') ?? 0;
+        $groupMatchPairs = ['A' => [], 'B' => []];
 
         foreach (['A', 'B'] as $group) {
             $clans = collect($registrations->get($group, []))->map(fn($r) => $r->clan)->filter()->values();
@@ -177,8 +188,7 @@ class AdminTournamentController extends Controller
 
             if ($n < 2) continue;
 
-            // Définition des paires à sauter pour le Groupe A si 6 clans (pour garantir 4 matchs par clan)
-            // Clan 0 saute Clan 1, Clan 2 saute Clan 3, Clan 4 saute Clan 5
+            // Paires d'exemptions pour le Groupe A si 6 clans (4 matchs par clan)
             $skippedPairs = [];
             if ($group === 'A' && $n === 6) {
                 $skippedPairs = [
@@ -190,48 +200,69 @@ class AdminTournamentController extends Controller
 
             for ($i = 0; $i < $n - 1; $i++) {
                 for ($j = $i + 1; $j < $n; $j++) {
-                    // Sauter la confrontation si c'est une paire d'exemption du Groupe A
                     if (isset($skippedPairs["{$i}-{$j}"])) {
                         continue;
                     }
-
-                    $clanHome = $clans[$i];
-                    $clanAway = $clans[$j];
-
-                    // Vérifier que le match n'existe pas déjà
-                    $exists = \App\Models\TournamentMatch::where('competition_id', $competition->id)
-                        ->where('phase', 'group_stage')
-                        ->where('group', $group)
-                        ->where(function($q) use ($clanHome, $clanAway) {
-                            $q->where(function($q2) use ($clanHome, $clanAway) {
-                                $q2->where('clan_home_id', $clanHome->id)
-                                   ->where('clan_away_id', $clanAway->id);
-                            })->orWhere(function($q2) use ($clanHome, $clanAway) {
-                                $q2->where('clan_home_id', $clanAway->id)
-                                   ->where('clan_away_id', $clanHome->id);
-                            });
-                        })->exists();
-
-                    if (!$exists) {
-                        $matchNumber++;
-                        \App\Models\TournamentMatch::create([
-                            'competition_id' => $competition->id,
-                            'round' => 1,
-                            'group' => $group,
-                            'phase' => 'group_stage',
-                            'match_number' => $matchNumber,
-                            'clan_home_id' => $clanHome->id,
-                            'clan_away_id' => $clanAway->id,
-                            'status' => 'scheduled',
-                        ]);
-                        $created++;
-                    }
+                    $groupMatchPairs[$group][] = [
+                        'home' => $clans[$i],
+                        'away' => $clans[$j],
+                    ];
                 }
             }
         }
 
+        // Intercaler les matchs de la matrice (A1 vs A3, B1 vs B2, A1 vs A4, B1 vs B3...)
+        $interleavedPairs = [];
+        $maxCount = max(count($groupMatchPairs['A']), count($groupMatchPairs['B']));
+
+        for ($idx = 0; $idx < $maxCount; $idx++) {
+            if (isset($groupMatchPairs['A'][$idx])) {
+                $interleavedPairs[] = array_merge($groupMatchPairs['A'][$idx], ['group' => 'A']);
+            }
+            if (isset($groupMatchPairs['B'][$idx])) {
+                $interleavedPairs[] = array_merge($groupMatchPairs['B'][$idx], ['group' => 'B']);
+            }
+        }
+
+        $created = 0;
+        $matchNumber = \App\Models\TournamentMatch::where('competition_id', $competition->id)->max('match_number') ?? 0;
+
+        foreach ($interleavedPairs as $pair) {
+            $group = $pair['group'];
+            $clanHome = $pair['home'];
+            $clanAway = $pair['away'];
+
+            $exists = \App\Models\TournamentMatch::where('competition_id', $competition->id)
+                ->where('phase', 'group_stage')
+                ->where('group', $group)
+                ->where(function($q) use ($clanHome, $clanAway) {
+                    $q->where(function($q2) use ($clanHome, $clanAway) {
+                        $q2->where('clan_home_id', $clanHome->id)
+                           ->where('clan_away_id', $clanAway->id);
+                    })->orWhere(function($q2) use ($clanHome, $clanAway) {
+                        $q2->where('clan_home_id', $clanAway->id)
+                           ->where('clan_away_id', $clanHome->id);
+                    });
+                })->exists();
+
+            if (!$exists) {
+                $matchNumber++;
+                \App\Models\TournamentMatch::create([
+                    'competition_id' => $competition->id,
+                    'round' => 1,
+                    'group' => $group,
+                    'phase' => 'group_stage',
+                    'match_number' => $matchNumber,
+                    'clan_home_id' => $clanHome->id,
+                    'clan_away_id' => $clanAway->id,
+                    'status' => 'scheduled',
+                ]);
+                $created++;
+            }
+        }
+
         return response()->json([
-            'message' => "$created matchs de poule générés avec succès (4 matchs par clan) !",
+            'message' => "$created matchs de poule générés avec succès selon l'ordre du tirage !",
             'created' => $created,
         ]);
     }
