@@ -85,7 +85,21 @@ class TournamentController extends Controller
     }
 
     /**
-     * Récupère le classement des 2 groupes (A et B).
+     * Récupère la liste de tous les matchs du tournoi (poules + phase finale).
+     */
+    public function getMatches()
+    {
+        $matches = TournamentMatch::with(['clanHome', 'clanAway'])
+            ->orderByRaw('CASE WHEN scheduled_at IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('scheduled_at', 'asc')
+            ->orderBy('match_number', 'asc')
+            ->get();
+
+        return response()->json($matches);
+    }
+
+    /**
+     * Récupère le classement général des équipes.
      */
     public function getGroups(\App\Services\GroupStageService $service)
     {

@@ -17,6 +17,7 @@ Route::get('/login', function () {
 // --- Public Tournament Data ---
 Route::get('/tournament/leaderboard', [\App\Http\Controllers\TournamentController::class, 'getLeaderboard']);
 Route::get('/tournament/bracket', [\App\Http\Controllers\TournamentController::class, 'getBracket']);
+Route::get('/tournament/matches', [\App\Http\Controllers\TournamentController::class, 'getMatches']);
 Route::get('/tournament/clans', [\App\Http\Controllers\TournamentController::class, 'getClans']);
 Route::get('/tournament/groups', [\App\Http\Controllers\TournamentController::class, 'getGroups']);
 
