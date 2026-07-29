@@ -80,6 +80,7 @@ class AdminTournamentController extends Controller
         $registrations = \App\Models\ClanRegistration::with('clan')
             ->where('competition_id', $competition->id)
             ->where('status', 'confirmed')
+            ->orderBy('updated_at', 'asc')
             ->get();
 
         return response()->json($registrations);
@@ -97,6 +98,7 @@ class AdminTournamentController extends Controller
             ->firstOrFail();
 
         $registration->group = $request->group;
+        $registration->updated_at = now();
         $registration->save();
 
         return response()->json([
