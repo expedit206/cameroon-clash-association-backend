@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Clan;
+use App\Services\CocApiService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Gestion des clans par l'administration.
@@ -198,11 +200,11 @@ class AdminClanController extends Controller
     }
 
     /**
-     * Liste les joueurs du clan inscrits sur la plateforme mais pas encore dans le roster.
+     * Liste les joueurs du clan en temps réel (via CoC API) qui ont un compte sur la plateforme et ne sont pas encore dans le roster.
      */
-    public function availablePlayers(Clan $clan)
+    public function availablePlayers(Clan $clan, CocApiService $cocApi)
     {
-        // Chercher tous les joueurs validés dont le clan CoC correspond à ce clan
+        // 1. Joueurs déjà dans le roster confirmés
         $registration = \App\Models\ClanRegistration::where('clan_id', $clan->id)
             ->where('status', 'confirmed')
             ->latest()
@@ -215,16 +217,50 @@ class AdminClanController extends Controller
                 ->toArray();
         }
 
-        // On cherche les joueurs validés liés à ce clan ou tous les joueurs validés sans restriction excessive
-        $players = \App\Models\User::where('status', 'validated')
-            ->whereNotIn('id', $alreadyInRoster)
-            ->where(function($q) use ($clan) {
-                $q->where('current_clan_tag', $clan->tag_coc)
-                  ->orWhereNull('current_clan_tag');
-            })
-            ->select('id', 'name', 'tag_coc', 'hdv_level')
-            ->orderBy('name')
-            ->get();
+        // 2. Tenter de récupérer les membres du clan en temps réel depuis l'API Clash of Clans
+        $cocMembers = $cocApi->getClanMembers($clan->tag_coc);
+
+        if ($cocMembers && is_array($cocMembers)) {
+            // Extraire tous les tags des membres CoC
+            $memberTags = array_map(function($m) {
+                return strtoupper(trim($m['tag']));
+            }, $cocMembers);
+
+            $cleanTags = array_map(function($tag) {
+                return str_replace('#', '', $tag);
+            }, $memberTags);
+
+            $allTags = array_unique(array_merge($memberTags, $cleanTags));
+
+            // Trouver les utilisateurs enregistrés sur la plateforme dont le tag_coc ou current_clan_tag correspond
+            $players = \App\Models\User::whereNotIn('id', $alreadyInRoster)
+                ->where(function($q) use ($allTags, $clan) {
+                    $clanTagUpper = strtoupper(trim($clan->tag_coc));
+                    $cleanClanTag = str_replace('#', '', $clanTagUpper);
+
+                    $q->whereIn(DB::raw('UPPER(tag_coc)'), $allTags)
+                      ->orWhereIn(DB::raw("UPPER(REPLACE(tag_coc, '#', ''))"), $allTags)
+                      ->orWhere('current_clan_tag', $clanTagUpper)
+                      ->orWhere('current_clan_tag', $cleanClanTag);
+                })
+                ->select('id', 'name', 'tag_coc', 'hdv_level')
+                ->orderBy('name')
+                ->get();
+        } else {
+            // Fallback si l'API CoC est indisponible
+            $clanTagUpper = strtoupper(trim($clan->tag_coc));
+            $cleanClanTag = str_replace('#', '', $clanTagUpper);
+
+            $players = \App\Models\User::whereNotIn('id', $alreadyInRoster)
+                ->where(function($q) use ($clanTagUpper, $cleanClanTag) {
+                    $q->where('current_clan_tag', $clanTagUpper)
+                      ->orWhere('current_clan_tag', $cleanClanTag)
+                      ->orWhereNull('current_clan_tag');
+                })
+                ->select('id', 'name', 'tag_coc', 'hdv_level')
+                ->orderBy('name')
+                ->get();
+        }
 
         return response()->json($players);
     }
