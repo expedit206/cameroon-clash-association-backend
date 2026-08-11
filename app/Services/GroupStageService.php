@@ -112,6 +112,14 @@ class GroupStageService
             }
         }
 
+        // Calcul du % de destruction moyen (total / joués) pour chaque clan
+        foreach ($stats as &$row) {
+            $row['avg_destruction'] = $row['played'] > 0 
+                ? round($row['total_destruction'] / $row['played'], 2) 
+                : 0.0;
+        }
+        unset($row);
+
         // Convertir en tableau réindexé et trier
         $standings = array_values($stats);
 
@@ -122,15 +130,21 @@ class GroupStageService
             if ($a['total_stars'] !== $b['total_stars']) {
                 return $b['total_stars'] <=> $a['total_stars'];
             }
+            // Départage au % de destruction moyen par match
+            if ($a['avg_destruction'] !== $b['avg_destruction']) {
+                return $b['avg_destruction'] <=> $a['avg_destruction'];
+            }
             if ($a['total_destruction'] !== $b['total_destruction']) {
                 return $b['total_destruction'] <=> $a['total_destruction'];
             }
             return strcmp($a['clan_name'], $b['clan_name']);
         });
 
-        // Ajouter la position (1..N)
+        // Ajouter la position (1..N) et uniformiser total_destruction avec la moyenne
         foreach ($standings as $index => &$row) {
             $row['rank'] = $index + 1;
+            $row['total_destruction_sum'] = $row['total_destruction'];
+            $row['total_destruction'] = $row['avg_destruction'];
         }
 
         return $standings;

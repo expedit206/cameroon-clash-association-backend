@@ -20,6 +20,7 @@ Route::get('/tournament/bracket', [\App\Http\Controllers\TournamentController::c
 Route::get('/tournament/matches', [\App\Http\Controllers\TournamentController::class, 'getMatches']);
 Route::get('/tournament/clans', [\App\Http\Controllers\TournamentController::class, 'getClans']);
 Route::get('/tournament/groups', [\App\Http\Controllers\TournamentController::class, 'getGroups']);
+Route::get('/tournament/group-stage-summary', [\App\Http\Controllers\TournamentController::class, 'getGroupStageSummary']);
 
 // --- Découverte des Clans & Joueurs ---
 Route::get('/clans/cameroun', [ClanDiscoveryController::class, 'searchCamerounClans']);
@@ -89,13 +90,49 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/competitions/{competition}/confirmed-clans', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'confirmedClans']);
         Route::post('/admin/competitions/{competition}/assign-group', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'assignGroup']);
         Route::post('/admin/competitions/{competition}/create-match', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'createMatch']);
+        Route::post('/admin/competitions/{competition}/matches', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'createMatch']);
         Route::get('/admin/competitions/{competition}/group-standings', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'groupStandings']);
         Route::post('/admin/competitions/{competition}/generate-group-matches', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateGroupMatches']);
+        Route::post('/admin/competitions/{competition}/generate-semi-finals', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateSemiFinals']);
     });
 
     // --- Suivi des Paiements Utilisateur ---
     Route::get('/payments/status/{reference}', [\App\Http\Controllers\NotchPayController::class, 'getPaymentStatus']);
+
+    // ═══════════════════════════════════════════════════════════════
+    // ─── CCA CLASH BET ─── Marchés de Prédiction Communautaire ────
+    // ═══════════════════════════════════════════════════════════════
+
+    // Marchés & Paris (utilisateur)
+    Route::prefix('clash-bet')->group(function () {
+        Route::get('/markets', [\App\Http\Controllers\ClashBet\BetController::class, 'markets']);
+        Route::get('/markets/preview-odds', [\App\Http\Controllers\ClashBet\BetController::class, 'previewOdds']);
+        Route::get('/markets/{market}', [\App\Http\Controllers\ClashBet\BetController::class, 'show']);
+        Route::post('/bets', [\App\Http\Controllers\ClashBet\BetController::class, 'placeBet']);
+        Route::get('/my-bets', [\App\Http\Controllers\ClashBet\BetController::class, 'myBets']);
+
+        // CCA Wallet
+        Route::get('/wallet', [\App\Http\Controllers\ClashBet\WalletController::class, 'show']);
+        Route::get('/wallet/history', [\App\Http\Controllers\ClashBet\WalletController::class, 'history']);
+        Route::post('/wallet/deposit', [\App\Http\Controllers\ClashBet\WalletController::class, 'deposit']);
+        Route::post('/wallet/verify-deposit/{reference}', [\App\Http\Controllers\ClashBet\WalletController::class, 'verifyDeposit']);
+        Route::post('/wallet/withdraw', [\App\Http\Controllers\ClashBet\WalletController::class, 'withdraw']);
+    });
+
+    // Administration Clash Bet
+    Route::middleware('can:admin')->prefix('admin/clash-bet')->group(function () {
+        Route::get('/stats', [\App\Http\Controllers\Admin\AdminBetController::class, 'stats']);
+        Route::get('/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'markets']);
+        Route::post('/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'createMarket']);
+        Route::put('/markets/{market}/status', [\App\Http\Controllers\Admin\AdminBetController::class, 'updateStatus']);
+        Route::post('/markets/{market}/settle', [\App\Http\Controllers\Admin\AdminBetController::class, 'settle']);
+        Route::post('/markets/{market}/cancel', [\App\Http\Controllers\Admin\AdminBetController::class, 'cancel']);
+        Route::get('/available-matches', [\App\Http\Controllers\Admin\AdminBetController::class, 'availableMatches']);
+        Route::get('/withdrawals', [\App\Http\Controllers\Admin\AdminBetController::class, 'withdrawals']);
+        Route::put('/withdrawals/{withdrawal}/process', [\App\Http\Controllers\Admin\AdminBetController::class, 'processWithdrawal']);
+    });
 });
+
 
 // --- Public NotchPay Webhook & Callback (Outside Sanctum auth) ---
 Route::get('/notchpay/callback', [\App\Http\Controllers\NotchPayController::class, 'callback'])->name('notchpay.callback');

@@ -105,4 +105,60 @@ class TournamentController extends Controller
     {
         return response()->json($service->getGroupStandings(1));
     }
+
+    /**
+     * Récupère le récapitulatif MVP & bilan global de la phase de poules.
+     */
+    public function getGroupStageSummary(\App\Services\GroupStageService $service)
+    {
+        $standings = $service->getGroupStandings(1);
+        $allClans = array_merge($standings['A'] ?? [], $standings['B'] ?? []);
+
+        if (empty($allClans)) {
+            return response()->json([
+                'top_attack' => null,
+                'top_destruction' => null,
+                'undefeated_clans' => [],
+                'qualified_clans' => [],
+                'total_group_matches' => 0,
+                'completed_group_matches' => 0,
+                'is_completed' => false,
+            ]);
+        }
+
+        // Top Attaque (Le clan avec le plus d'étoiles)
+        $topAttack = collect($allClans)->sortByDesc('total_stars')->first();
+
+        // Top Destruction (% moyen de destruction le plus élevé)
+        $topDestruction = collect($allClans)->sortByDesc('avg_destruction')->first();
+
+        // Clans Invaincus (0 défaite)
+        $undefeated = collect($allClans)->filter(fn($c) => $c['played'] > 0 && $c['lost'] === 0)->values()->all();
+
+        // Les 4 qualifiés (Top 2 Groupe A & Top 2 Groupe B)
+        $qualifiedA = collect($standings['A'] ?? [])->take(2)->values()->all();
+        $qualifiedB = collect($standings['B'] ?? [])->take(2)->values()->all();
+
+        // Statistiques des matchs de poule
+        $groupMatches = TournamentMatch::where('competition_id', 1)
+            ->where(function($q) {
+                $q->where('phase', 'group_stage')->orWhereNotNull('group');
+            })->get();
+
+        $totalMatches = $groupMatches->count();
+        $completedMatches = $groupMatches->where('status', 'completed')->count();
+
+        return response()->json([
+            'top_attack' => $topAttack,
+            'top_destruction' => $topDestruction,
+            'undefeated_clans' => $undefeated,
+            'qualified_clans' => [
+                'group_A' => $qualifiedA,
+                'group_B' => $qualifiedB,
+            ],
+            'total_group_matches' => $totalMatches,
+            'completed_group_matches' => $completedMatches,
+            'is_completed' => $totalMatches > 0 && $totalMatches === $completedMatches,
+        ]);
+    }
 }

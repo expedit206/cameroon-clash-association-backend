@@ -41,5 +41,9 @@ class DatabaseSeeder extends Seeder
             'prize_2nd' => 20000,
             'prize_3rd' => 0,
         ]);
+        // Exécution du seeder des matchs et marchés de pari Clash Bet
+        $this->call([
+            TournamentMatchSeeder::class,
+        ]);
     }
 }

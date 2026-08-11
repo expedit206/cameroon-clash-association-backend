@@ -123,4 +123,26 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Clan::class, 'current_clan_tag', 'tag_coc');
     }
+
+    /**
+     * CCA Wallet de l'utilisateur.
+     */
+    public function wallet()
+    {
+        return $this->hasOne(Wallet::class);
+    }
+
+    /**
+     * Récupère ou crée le wallet de l'utilisateur.
+     */
+    public function getOrCreateWallet(): Wallet
+    {
+        return $this->wallet ?? $this->wallet()->create([
+            'balance'         => 0,
+            'locked_amount'   => 0,
+            'total_deposited' => 0,
+            'total_won'       => 0,
+            'total_withdrawn' => 0,
+        ]);
+    }
 }

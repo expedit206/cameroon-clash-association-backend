@@ -266,5 +266,62 @@ class AdminTournamentController extends Controller
             'created' => $created,
         ]);
     }
+
+    /**
+     * Génère automatiquement les demi-finales (Carré d'As) selon le classement des poules :
+     * - Demi-Finale 1 : 1er Groupe A vs 2ème Groupe B
+     * - Demi-Finale 2 : 1er Groupe B vs 2ème Groupe A
+     */
+    public function generateSemiFinals(Competition $competition, \App\Services\GroupStageService $service)
+    {
+        $standings = $service->getGroupStandings($competition->id);
+
+        if (empty($standings['A']) || count($standings['A']) < 2 || empty($standings['B']) || count($standings['B']) < 2) {
+            return response()->json([
+                'message' => 'Les classements des groupes A et B doivent contenir au moins 2 clans chacun pour générer les demi-finales.'
+            ], 422);
+        }
+
+        $a1 = $standings['A'][0];
+        $a2 = $standings['A'][1];
+        $b1 = $standings['B'][0];
+        $b2 = $standings['B'][1];
+
+        // Créer ou mettre à jour la Demi-Finale 1 (A1 vs B2)
+        $sf1 = \App\Models\TournamentMatch::updateOrCreate(
+            [
+                'competition_id' => $competition->id,
+                'phase' => 'semi_final',
+                'match_number' => 1,
+            ],
+            [
+                'round' => 2,
+                'clan_home_id' => $a1['clan_id'],
+                'clan_away_id' => $b2['clan_id'],
+                'status' => 'scheduled',
+            ]
+        );
+
+        // Créer ou mettre à jour la Demi-Finale 2 (B1 vs A2)
+        $sf2 = \App\Models\TournamentMatch::updateOrCreate(
+            [
+                'competition_id' => $competition->id,
+                'phase' => 'semi_final',
+                'match_number' => 2,
+            ],
+            [
+                'round' => 2,
+                'clan_home_id' => $b1['clan_id'],
+                'clan_away_id' => $a2['clan_id'],
+                'status' => 'scheduled',
+            ]
+        );
+
+        return response()->json([
+            'message' => 'Demi-Finales générées avec succès ! Affiches : ' . $a1['clan_name'] . ' vs ' . $b2['clan_name'] . ' & ' . $b1['clan_name'] . ' vs ' . $a2['clan_name'],
+            'semi_finals' => [$sf1->load(['clanHome', 'clanAway']), $sf2->load(['clanHome', 'clanAway'])],
+        ]);
+    }
 }
+
 

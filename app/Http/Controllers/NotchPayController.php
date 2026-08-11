@@ -32,14 +32,47 @@ class NotchPayController extends Controller
 
         if (!$reference) {
             Log::warning('[NotchPay] Callback: Reference was missing in request parameters.');
-            return redirect($frontendUrl . '/tournaments/register?payment=error&message=reference_missing');
+            return redirect($frontendUrl . '/clash-bet/wallet?payment=error&message=reference_missing');
         }
 
+        // 1. Déterminer si c'est un dépôt de wallet (par préfixe, cache, ou inspection des métadonnées NotchPay)
+        $isWalletDeposit = str_starts_with($reference, 'WALLET-') || cache()->has("wallet_deposit_{$reference}");
+
+        if (!$isWalletDeposit) {
+            try {
+                $notchPayment = $this->notchPayService->verifyPayment($reference);
+                $metadata     = $notchPayment->transaction->metadata ?? null;
+                if (is_array($metadata)) {
+                    $metadata = (object) $metadata;
+                }
+                $type        = $metadata->type ?? null;
+                $merchantRef = $metadata->reference ?? null;
+
+                if ($type === 'wallet_deposit' || ($merchantRef && str_starts_with($merchantRef, 'WALLET-'))) {
+                    $isWalletDeposit = true;
+                }
+            } catch (\Exception $e) {
+                Log::warning("[NotchPay Callback] Impossible d'inspecter la référence $reference: " . $e->getMessage());
+            }
+        }
+
+        if ($isWalletDeposit) {
+            $status = $this->notchPayService->checkAndFulfillWalletDeposit($reference);
+
+            if (in_array($status, ['confirmed', 'complete', 'success', 'completed'])) {
+                return redirect($frontendUrl . '/clash-bet/wallet?payment=success&reference=' . $reference);
+            } elseif (in_array($status, ['failed', 'expired', 'cancelled'])) {
+                return redirect($frontendUrl . '/clash-bet/wallet?payment=failed&reference=' . $reference);
+            }
+            return redirect($frontendUrl . '/clash-bet/wallet?payment=pending&reference=' . $reference);
+        }
+
+        // 2. Sinon, c'est un paiement d'inscription de tournoi
         $status = $this->notchPayService->checkAndFulfillTransaction($reference);
 
-        if ($status === 'confirmed') {
+        if (in_array($status, ['confirmed', 'complete', 'success', 'completed'])) {
             return redirect($frontendUrl . '/tournaments/register?payment=success&reference=' . $reference);
-        } elseif ($status === 'failed') {
+        } elseif (in_array($status, ['failed', 'expired', 'cancelled'])) {
             return redirect($frontendUrl . '/tournaments/register?payment=failed&reference=' . $reference);
         }
 
@@ -54,8 +87,6 @@ class NotchPayController extends Controller
         $payload = $request->all();
         Log::info('[NotchPay] Webhook received:', $payload);
 
-        // Standard NotchPay payload may contain the reference in different places:
-        // usually $payload['data']['reference'] or $payload['reference']
         $reference = $payload['data']['reference'] ?? $payload['reference'] ?? null;
 
         if (!$reference) {
@@ -63,11 +94,23 @@ class NotchPayController extends Controller
             return response()->json(['message' => 'No reference found'], 400);
         }
 
-        $result = $this->notchPayService->checkAndFulfillTransaction($reference);
+        $type        = $payload['data']['metadata']['type'] ?? $payload['metadata']['type'] ?? null;
+        $merchantRef = $payload['data']['metadata']['reference'] ?? $payload['metadata']['reference'] ?? null;
+
+        $isWalletDeposit = str_starts_with($reference, 'WALLET-')
+            || $type === 'wallet_deposit'
+            || ($merchantRef && str_starts_with($merchantRef, 'WALLET-'))
+            || cache()->has("wallet_deposit_{$reference}");
+
+        if ($isWalletDeposit) {
+            $result = $this->notchPayService->checkAndFulfillWalletDeposit($reference);
+        } else {
+            $result = $this->notchPayService->checkAndFulfillTransaction($reference);
+        }
 
         return response()->json([
             'message' => 'Processed',
-            'status' => $result
+            'status'  => $result
         ]);
     }
 
@@ -82,8 +125,8 @@ class NotchPayController extends Controller
             return response()->json(['success' => false, 'message' => 'Paiement introuvable.'], 404);
         }
 
-        // If local payment status isn't confirmed yet, double check directly with NotchPay
-        if ($payment->status !== 'confirmed') {
+        // If local payment status isn't complete yet, double check directly with NotchPay
+        if ($payment->status !== 'complete') {
             $this->notchPayService->checkAndFulfillTransaction($reference);
             $payment->refresh();
         }
