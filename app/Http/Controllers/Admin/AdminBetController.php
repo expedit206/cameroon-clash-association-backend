@@ -290,7 +290,7 @@ class AdminBetController extends Controller
         $matchesWithMarkets = BetMarket::whereNotIn('status', ['cancelled','completed'])->pluck('match_id');
 
         $matches = TournamentMatch::with(['clanHome', 'clanAway'])
-            ->whereIn('id', $matchesWithMarkets)
+            ->whereNotIn('id', $matchesWithMarkets)
             ->whereIn('status', ['upcoming', 'scheduled', 'pending'])
             ->get()
             ->map(function ($m) {
