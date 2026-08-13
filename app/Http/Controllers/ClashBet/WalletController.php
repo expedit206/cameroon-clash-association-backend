@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\ClashBet;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppSetting;
 use App\Models\Withdrawal;
-use App\Services\ClashBetService;
 use App\Services\NotchPayService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -12,12 +12,10 @@ use Illuminate\Support\Str;
 
 class WalletController extends Controller
 {
-    public const WITHDRAWAL_FEE_RATE = 0.07; // 7%
-    public const MIN_WITHDRAWAL      = 1000; // FCFA
+    public const MIN_WITHDRAWAL = 1000; // FCFA
 
     public function __construct(
-        private readonly NotchPayService $notchPayService,
-        private readonly ClashBetService $betService
+        private readonly NotchPayService $notchPayService
     ) {}
 
     /**
@@ -176,7 +174,8 @@ class WalletController extends Controller
             ], 422);
         }
 
-        $fee       = (int) round($amount * self::WITHDRAWAL_FEE_RATE);
+        $feeRate   = AppSetting::clashBetWithdrawalFee() / 100;
+        $fee       = (int) round($amount * $feeRate);
         $netAmount = $amount - $fee;
 
         // Débit immédiat du wallet + création de la demande
@@ -202,15 +201,16 @@ class WalletController extends Controller
             return $withdrawal;
         });
 
+        $feePercentage = AppSetting::clashBetWithdrawalFee();
         return response()->json([
-            'success'     => true,
+            'success'       => true,
             'withdrawal_id' => $withdrawal->id,
-            'amount'      => $amount,
-            'fee'         => $fee,
-            'fee_details' => "7% de frais de retrait = {$fee} FCFA",
-            'net_amount'  => $netAmount,
-            'status'      => 'pending',
-            'message'     => "Votre demande de retrait de {$netAmount} FCFA a été soumise. Un administrateur la traitera sous 24h.",
+            'amount'        => $amount,
+            'fee'           => $fee,
+            'fee_details'   => "{$feePercentage}% de frais de retrait = {$fee} FCFA",
+            'net_amount'    => $netAmount,
+            'status'        => 'pending',
+            'message'       => "Votre demande de retrait de {$netAmount} FCFA a été soumise. Un administrateur la traitera sous 24h.",
         ], 201);
     }
 }

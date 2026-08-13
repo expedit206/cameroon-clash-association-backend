@@ -3,44 +3,52 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Bet;
+use App\Models\AppSetting;
 use App\Models\BetMarket;
 use App\Models\BetOption;
+use App\Models\BetTicket;
 use App\Models\TournamentMatch;
 use App\Models\Withdrawal;
-use App\Services\ClashBetOddsService;
-use App\Services\ClashBetService;
+use App\Models\ClashBetAudit;
+use App\Services\ClashBetTicketService;
+use App\Services\ClashBet\MarketBuilderService;
+use App\Services\ClashBet\RuleEvaluatorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class AdminBetController extends Controller
 {
     public function __construct(
-        private readonly ClashBetService     $betService,
-        private readonly ClashBetOddsService $oddsService
+        private readonly ClashBetTicketService $ticketService,
+        private readonly MarketBuilderService $marketBuilderService,
+        private readonly RuleEvaluatorService $ruleEvaluatorService
     ) {}
+
+    // ─── Statistiques Globales ────────────────────────────────────────────────
 
     /**
      * GET /admin/clash-bet/stats
-     * Statistiques globales du module Clash Bet.
      */
     public function stats()
     {
         return response()->json([
-            'total_markets'      => BetMarket::count(),
-            'open_markets'       => BetMarket::open()->count(),
-            'total_bets'         => Bet::count(),
-            'total_pool_volume'  => BetMarket::sum('total_pool'),
-            'total_won'          => Bet::where('status', 'won')->sum('actual_payout'),
-            'pending_withdrawals'=> Withdrawal::pending()->count(),
-            'pending_withdrawal_volume' => Withdrawal::pending()->sum('amount'),
-            'total_fees_collected' => Withdrawal::where('status', 'completed')->sum('fee'),
+            'total_markets'          => BetMarket::count(),
+            'open_markets'           => BetMarket::where('status', 'open')->count(),
+            'total_tickets'          => BetTicket::count(),
+            'open_tickets'           => BetTicket::where('status', 'open')->count(),
+            'matched_tickets'        => BetTicket::where('status', 'matched')->count(),
+            'settled_tickets'        => BetTicket::where('status', 'settled')->count(),
+            'total_volume_locked'    => BetTicket::whereIn('status', ['open', 'matched', 'locked'])->sum('amount'),
+            'total_commission'       => Withdrawal::where('status', 'completed')->sum('fee'),
+            'pending_withdrawals'    => Withdrawal::where('status', 'pending')->count(),
+            'review_flags'           => BetTicket::where('review_required', true)->where('status', '!=', 'settled')->count(),
         ]);
     }
 
+    // ─── Gestion des Marchés ──────────────────────────────────────────────────
+
     /**
      * GET /admin/clash-bet/markets
-     * Liste tous les marchés.
      */
     public function markets(Request $request)
     {
@@ -50,26 +58,26 @@ class AdminBetController extends Controller
             ->paginate(20);
 
         $markets->getCollection()->transform(function ($market) {
-            $allOdds = $this->oddsService->computeAllOdds($market);
             return [
-                'id'          => $market->id,
-                'status'      => $market->status,
-                'total_pool'  => $market->total_pool,
-                'bets_count'  => $market->bets()->count(),
+                'id'                => $market->id,
+                'status'            => $market->status,
                 'betting_closes_at' => $market->betting_closes_at?->toISOString(),
+                'cancelled_reason'  => $market->cancelled_reason,
                 'match' => [
-                    'id'   => $market->match?->id,
-                    'home' => $market->match?->clanHome?->name,
-                    'away' => $market->match?->clanAway?->name,
-                    'status' => $market->match?->status,
+                    'id'           => $market->match?->id,
+                    'home'         => $market->match?->clanHome?->name,
+                    'away'         => $market->match?->clanAway?->name,
+                    'status'       => $market->match?->status,
                     'scheduled_at' => $market->match?->scheduled_at?->toISOString(),
                 ],
                 'options' => $market->options->map(fn($opt) => [
-                    'id'           => $opt->id,
-                    'label'        => $opt->label,
-                    'current_pool' => $opt->current_pool,
-                    'current_odds' => $allOdds[$opt->id] ?? 2.0,
+                    'id'    => $opt->id,
+                    'label' => $opt->label,
                 ]),
+                'open_tickets'    => BetTicket::where('market_id', $market->id)->where('status', 'open')->count(),
+                'matched_tickets' => BetTicket::where('market_id', $market->id)->where('status', 'matched')->count(),
+                'settled_tickets' => BetTicket::where('market_id', $market->id)->where('status', 'settled')->count(),
+                'total_volume'    => BetTicket::where('market_id', $market->id)->whereIn('status', ['matched', 'locked', 'settled'])->sum('amount') * 2,
             ];
         });
 
@@ -78,39 +86,31 @@ class AdminBetController extends Controller
 
     /**
      * POST /admin/clash-bet/markets
-     * Créer un marché de prédiction sur un match CCA.
      */
     public function createMarket(Request $request)
     {
         $request->validate([
-            'match_id'        => 'required|exists:tournament_matches,id',
-            'liquidity_weight'=> 'nullable|integer|min:10000',
+            'match_id'          => 'required|exists:tournament_matches,id',
             'betting_closes_at' => 'nullable|date|after:now',
         ]);
 
         $match = TournamentMatch::with(['clanHome', 'clanAway'])->findOrFail($request->match_id);
 
-        // Vérifier qu'il n'y a pas déjà un marché ouvert pour ce match
         $exists = BetMarket::where('match_id', $match->id)
             ->whereNotIn('status', ['cancelled'])
             ->exists();
 
         if ($exists) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Un marché existe déjà pour ce match.',
-            ], 422);
+            return response()->json(['success' => false, 'message' => 'Un marché existe déjà pour ce match.'], 422);
         }
 
         $market = BetMarket::create([
             'match_id'          => $match->id,
             'status'            => 'open',
-            'liquidity_weight'  => $request->liquidity_weight ?? 100000,
             'total_pool'        => 0,
             'betting_closes_at' => $request->betting_closes_at,
         ]);
 
-        // Créer les deux options (Clan Home / Clan Away)
         BetOption::create([
             'market_id' => $market->id,
             'label'     => $match->clanHome?->name ?? 'Équipe A',
@@ -125,16 +125,11 @@ class AdminBetController extends Controller
 
         $market->load('options');
 
-        return response()->json([
-            'success' => true,
-            'market'  => $market,
-            'message' => "Marché créé pour le match #{$match->id}.",
-        ], 201);
+        return response()->json(['success' => true, 'market' => $market, 'message' => "Marché P2P créé pour le match #{$match->id}."], 201);
     }
 
     /**
      * PUT /admin/clash-bet/markets/{market}/status
-     * Mettre à jour le statut d'un marché (suspended/closed).
      */
     public function updateStatus(Request $request, BetMarket $market)
     {
@@ -151,9 +146,11 @@ class AdminBetController extends Controller
         return response()->json(['success' => true, 'market' => $market]);
     }
 
+    // ─── Règlement & Annulation ───────────────────────────────────────────────
+
     /**
      * POST /admin/clash-bet/markets/{market}/settle
-     * Valider le résultat et distribuer les gains.
+     * Déclarer le résultat officiel et distribuer les gains.
      */
     public function settle(Request $request, BetMarket $market)
     {
@@ -161,31 +158,19 @@ class AdminBetController extends Controller
             'winning_option_id' => 'required|exists:bet_options,id',
         ]);
 
-        // Fermer le marché avant règlement
-        if ($market->status === 'open' || $market->status === 'suspended') {
-            $market->update(['status' => 'closed']);
-        }
-
-        if (!in_array($market->status, ['closed', 'settled'])) {
-            return response()->json([
-                'success' => false,
-                'message' => "Le marché doit être fermé avant le règlement (statut actuel: {$market->status}).",
-            ], 422);
-        }
-
         if ($market->status === 'settled') {
             return response()->json(['success' => false, 'message' => 'Ce marché a déjà été réglé.'], 422);
         }
 
         try {
-            $stats = $this->betService->settleMarket($market, $request->winning_option_id);
+            $stats = $this->ticketService->settleMarket($market, $request->winning_option_id);
 
             return response()->json([
-                'success'     => true,
-                'winners'     => $stats['winners'],
-                'losers'      => $stats['losers'],
-                'total_paid'  => $stats['total_paid'],
-                'message'     => "Marché réglé : {$stats['winners']} gagnants, {$stats['total_paid']} FCFA distribués.",
+                'success'          => true,
+                'settled'          => $stats['settled'],
+                'total_paid'       => $stats['total_paid'],
+                'total_commission' => $stats['total_commission'],
+                'message'          => "Marché réglé : {$stats['settled']} tickets, {$stats['total_paid']} FCFA distribués, {$stats['total_commission']} FCFA de commission.",
             ]);
 
         } catch (\Exception $e) {
@@ -195,23 +180,167 @@ class AdminBetController extends Controller
 
     /**
      * POST /admin/clash-bet/markets/{market}/cancel
-     * Annuler un marché et rembourser tous les paris.
+     * Annuler un marché et rembourser 100% sans frais.
      */
     public function cancel(Request $request, BetMarket $market)
     {
         $request->validate(['reason' => 'required|string|max:255']);
 
         try {
-            $this->betService->cancelMarket($market, $request->reason);
-            return response()->json(['success' => true, 'message' => 'Marché annulé et paris remboursés.']);
+            $count = $this->ticketService->cancelMarket($market, $request->reason);
+            return response()->json(['success' => true, 'refunded' => $count, 'message' => "{$count} ticket(s) remboursé(s) intégralement."]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     }
 
+    // ─── Gestion des Tickets ──────────────────────────────────────────────────
+
+    /**
+     * GET /admin/clash-bet/tickets
+     */
+    public function tickets(Request $request)
+    {
+        $tickets = BetTicket::with(['market.match.clanHome', 'market.match.clanAway', 'creator', 'taker', 'creatorOption', 'takerOption', 'winner'])
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->market_id, fn($q) => $q->where('market_id', $request->market_id))
+            ->when($request->review_required, fn($q) => $q->where('review_required', true))
+            ->latest()
+            ->paginate(25);
+
+        $tickets->getCollection()->transform(fn($t) => [
+            'id'                    => $t->id,
+            'ticket_number'         => $t->ticket_number,
+            'status'                => $t->status,
+            'amount'                => $t->amount,
+            'gross_payout'          => $t->gross_payout,
+            'commission_amount'     => $t->commission_amount,
+            'net_payout'            => $t->net_payout,
+            'risk_score'            => $t->risk_score,
+            'review_required'       => $t->review_required,
+            'creator'               => ['id' => $t->creator?->id, 'name' => $t->creator?->name],
+            'taker'                 => $t->taker_id ? ['id' => $t->taker?->id, 'name' => $t->taker?->name] : null,
+            'creator_option'        => $t->creatorOption?->label,
+            'taker_option'          => $t->takerOption?->label,
+            'winner'                => $t->winner_id ? ['id' => $t->winner?->id, 'name' => $t->winner?->name] : null,
+            'match'                 => $t->market?->match ? [
+                'home' => $t->market->match->clanHome?->name,
+                'away' => $t->market->match->clanAway?->name,
+            ] : null,
+            'matched_at'            => $t->matched_at?->toISOString(),
+            'settled_at'            => $t->settled_at?->toISOString(),
+            'created_at'            => $t->created_at->toISOString(),
+        ]);
+
+        return response()->json($tickets);
+    }
+
+    // ─── Configuration ────────────────────────────────────────────────────────
+
+    /**
+     * GET /admin/clash-bet/settings
+     */
+    public function settings()
+    {
+        return response()->json([
+            'clash_bet_commission_percentage'    => AppSetting::clashBetCommission(),
+            'clash_bet_close_offset_minutes'     => AppSetting::clashBetCloseOffset(),
+            'clash_bet_min_amount'               => AppSetting::clashBetMinAmount(),
+            'clash_bet_max_amount'               => AppSetting::clashBetMaxAmount(),
+            'clash_bet_fixed_odds'               => AppSetting::clashBetFixedOdds(),
+            'clash_bet_withdrawal_fee_percentage'=> AppSetting::clashBetWithdrawalFee(),
+        ]);
+    }
+
+    /**
+     * PUT /admin/clash-bet/settings
+     */
+    public function updateSettings(Request $request)
+    {
+        $request->validate([
+            'clash_bet_commission_percentage'     => 'nullable|numeric|min:0|max:50',
+            'clash_bet_close_offset_minutes'      => 'nullable|integer|min:0|max:60',
+            'clash_bet_min_amount'                => 'nullable|integer|min:100',
+            'clash_bet_max_amount'                => 'nullable|integer|max:1000000',
+            'clash_bet_withdrawal_fee_percentage' => 'nullable|numeric|min:0|max:50',
+        ]);
+
+        foreach ($request->only([
+            'clash_bet_commission_percentage',
+            'clash_bet_close_offset_minutes',
+            'clash_bet_min_amount',
+            'clash_bet_max_amount',
+            'clash_bet_withdrawal_fee_percentage',
+        ]) as $key => $value) {
+            if (!is_null($value)) {
+                AppSetting::set($key, (string) $value);
+            }
+        }
+
+        return response()->json(['success' => true, 'message' => 'Configuration mise à jour.']);
+    }
+
+    // ─── Matchs Disponibles & Retraits ───────────────────────────────────────
+
+    /**
+     * GET /admin/clash-bet/available-matches
+     */
+    public function availableMatches()
+    {
+        $matchesWithMarkets = BetMarket::whereNotIn('status', ['cancelled','completed'])->pluck('match_id');
+
+        $matches = TournamentMatch::with(['clanHome', 'clanAway'])
+            ->whereIn('id', $matchesWithMarkets)
+            ->whereIn('status', ['upcoming', 'scheduled', 'pending'])
+            ->get()
+            ->map(function ($m) {
+                $homeReg = \App\Models\ClanRegistration::where('clan_id', $m->clan_home_id)
+                    ->where('competition_id', $m->competition_id)
+                    ->first();
+                $homePlayers = $homeReg
+                    ? \App\Models\RegistrationPlayer::with('user')->where('clan_registration_id', $homeReg->id)->get()->map(fn($p) => [
+                        'id'            => $p->user?->id,
+                        'name'          => $p->user?->name,
+                        'tag_coc'       => $p->user?->tag_coc,
+                        'is_substitute' => $p->is_substitute,
+                        'role_label'    => $p->is_substitute ? 'Remplaçant' : 'Titulaire',
+                    ])
+                    : collect([]);
+
+                $awayReg = \App\Models\ClanRegistration::where('clan_id', $m->clan_away_id)
+                    ->where('competition_id', $m->competition_id)
+                    ->first();
+                $awayPlayers = $awayReg
+                    ? \App\Models\RegistrationPlayer::with('user')->where('clan_registration_id', $awayReg->id)->get()->map(fn($p) => [
+                        'id'            => $p->user?->id,
+                        'name'          => $p->user?->name,
+                        'tag_coc'       => $p->user?->tag_coc,
+                        'is_substitute' => $p->is_substitute,
+                        'role_label'    => $p->is_substitute ? 'Remplaçant' : 'Titulaire',
+                    ])
+                    : collect([]);
+
+                return [
+                    'id'                => $m->id,
+                    'status'            => $m->status,
+                    'competition_id'    => $m->competition_id,
+                    'scheduled_at'      => $m->scheduled_at?->toISOString(),
+                    'clan_home'         => $m->clanHome?->name ?? 'Clan A',
+                    'clan_home_id'      => $m->clan_home_id,
+                    'clan_home_badge'   => $m->clanHome?->badge_url,
+                    'clan_home_players' => $homePlayers,
+                    'clan_away'         => $m->clanAway?->name ?? 'Clan B',
+                    'clan_away_id'      => $m->clan_away_id,
+                    'clan_away_badge'   => $m->clanAway?->badge_url,
+                    'clan_away_players' => $awayPlayers,
+                ];
+            });
+
+        return response()->json($matches);
+    }
+
     /**
      * GET /admin/clash-bet/withdrawals
-     * Liste les demandes de retrait.
      */
     public function withdrawals(Request $request)
     {
@@ -225,7 +354,6 @@ class AdminBetController extends Controller
 
     /**
      * PUT /admin/clash-bet/withdrawals/{withdrawal}/process
-     * Valider ou rejeter un retrait.
      */
     public function processWithdrawal(Request $request, Withdrawal $withdrawal)
     {
@@ -245,13 +373,8 @@ class AdminBetController extends Controller
                 'processed_by' => Auth::id(),
                 'processed_at' => now(),
             ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => "Retrait de {$withdrawal->net_amount} FCFA approuvé pour {$withdrawal->user->name}.",
-            ]);
+            return response()->json(['success' => true, 'message' => "Retrait approuvé pour {$withdrawal->user->name}."]);
         } else {
-            // Remboursement si rejeté
             $user   = $withdrawal->user;
             $wallet = $user->getOrCreateWallet();
 
@@ -259,11 +382,10 @@ class AdminBetController extends Controller
                 $wallet->credit(
                     $withdrawal->amount,
                     'bet_refund',
-                    "Remboursement retrait rejeté — Note: {$request->admin_note}",
+                    "Remboursement retrait rejeté — {$request->admin_note}",
                     (string) $withdrawal->id,
                     'App\\Models\\Withdrawal'
                 );
-
                 $withdrawal->update([
                     'status'       => 'failed',
                     'admin_note'   => $request->admin_note,
@@ -272,34 +394,132 @@ class AdminBetController extends Controller
                 ]);
             });
 
-            return response()->json([
-                'success' => true,
-                'message' => "Retrait rejeté. {$withdrawal->amount} FCFA remboursés sur le wallet de {$withdrawal->user->name}.",
-            ]);
+            return response()->json(['success' => true, 'message' => "Retrait rejeté. {$withdrawal->amount} FCFA remboursés."]);
         }
     }
 
     /**
-     * GET /admin/clash-bet/available-matches
-     * Liste les matchs sans marché de pari (pour créer un marché).
+     * POST /admin/clash-bet/markets/builder
+     * Création d'un marché avec règle AST JSON.
      */
-    public function availableMatches()
+    public function createMarketBuilder(Request $request)
     {
-        $matchesWithMarkets = BetMarket::whereNotIn('status', ['cancelled'])
-            ->pluck('match_id');
+        $request->validate([
+            'match_id'          => 'required|exists:tournament_matches,id',
+            'category'          => 'required|in:team,player,comparison,advanced',
+            'rule_definition'   => 'required|array',
+            'title'             => 'nullable|string|max:255',
+            'description'       => 'nullable|string',
+            'betting_closes_at' => 'nullable|date',
+        ]);
 
-        $matches = TournamentMatch::with(['clanHome', 'clanAway'])
-            ->whereNotIn('id', $matchesWithMarkets)
-            ->whereIn('status', ['upcoming', 'scheduled', 'pending'])
-            ->get()
-            ->map(fn($m) => [
-                'id'          => $m->id,
-                'status'      => $m->status,
-                'scheduled_at'=> $m->scheduled_at?->toISOString(),
-                'clan_home'   => $m->clanHome?->name,
-                'clan_away'   => $m->clanAway?->name,
+        try {
+            $market = $this->marketBuilderService->createMarket($request->all());
+            return response()->json([
+                'success' => true,
+                'message' => 'Marché créé avec succès avec la règle AST.',
+                'market'  => $market->load('match.clanHome', 'match.clanAway'),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * POST /admin/clash-bet/markets/simulate
+     * Teste une règle AST JSON sur des données simulées.
+     */
+    public function simulateRule(Request $request)
+    {
+        $request->validate([
+            'rule_definition' => 'required|array',
+            'mock_dataset'    => 'required|array',
+        ]);
+
+        try {
+            $eval = $this->ruleEvaluatorService->evaluateMock(
+                $request->rule_definition,
+                $request->mock_dataset
+            );
+            return response()->json([
+                'success' => true,
+                'eval'    => $eval,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * POST /admin/clash-bet/markets/bulk-generate
+     * Génération en lot de marchés standards.
+     */
+    public function bulkGenerate(Request $request)
+    {
+        $request->validate([
+            'match_id' => 'required|exists:tournament_matches,id',
+        ]);
+
+        try {
+            $match   = TournamentMatch::findOrFail($request->match_id);
+            $created = $this->marketBuilderService->bulkGenerateStandardMarkets($match);
+            return response()->json([
+                'success' => true,
+                'message' => count($created) . " marchés générés automatiquement avec succès.",
+                'markets' => $created,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * POST /admin/clash-bet/markets/{market}/settle-auto
+     * Règlement automatique d'un marché par Rule Engine.
+     */
+    public function settleAuto(BetMarket $market)
+    {
+        try {
+            $stats = $this->ticketService->settleMarketAuto($market);
+
+            ClashBetAudit::create([
+                'admin_id'   => Auth::id(),
+                'event_type' => 'MARKET_SETTLED_AUTO',
+                'market_id'  => $market->id,
+                'payload'    => $stats,
             ]);
 
-        return response()->json($matches);
+            return response()->json([
+                'success' => true,
+                'message' => "Marché réglé automatiquement. Position gagnante: {$stats['winning_side']}.",
+                'stats'   => $stats,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * GET /admin/clash-bet/audits
+     */
+    public function audits(Request $request)
+    {
+        $audits = ClashBetAudit::with(['admin', 'market', 'ticket'])
+            ->latest()
+            ->paginate(30);
+
+        return response()->json($audits);
     }
 }

@@ -133,4 +133,93 @@ class Wallet extends Model
             'description'    => $description,
         ]);
     }
+
+    // ─── Méthodes P2P Tickets ─────────────────────────────────────────────────
+
+    /**
+     * Verrouille la mise lors de la création d'un ticket P2P.
+     */
+    public function lockTicket(int $amount, string $description = '', ?string $reference = null): WalletTransaction
+    {
+        if ($this->balance < $amount) {
+            throw new \Exception('Solde insuffisant.');
+        }
+        $before = $this->balance;
+        $this->decrement('balance', $amount);
+        $this->increment('locked_amount', $amount);
+        $this->refresh();
+
+        return $this->transactions()->create([
+            'type'           => 'bet_lock',
+            'amount'         => $amount,
+            'balance_before' => $before,
+            'balance_after'  => $this->balance,
+            'reference'      => $reference,
+            'reference_type' => 'App\\Models\\BetTicket',
+            'description'    => $description,
+        ]);
+    }
+
+    /**
+     * Déverrouille la mise (annulation ou remboursement) et recrédite le solde disponible.
+     */
+    public function unlockTicket(int $amount, string $type, string $description = '', ?string $reference = null): WalletTransaction
+    {
+        $before = $this->balance;
+        $this->decrement('locked_amount', max(0, $amount));
+        $this->increment('balance', $amount);
+        $this->refresh();
+
+        return $this->transactions()->create([
+            'type'           => $type, // bet_cancel | bet_refund
+            'amount'         => $amount,
+            'balance_before' => $before,
+            'balance_after'  => $this->balance,
+            'reference'      => $reference,
+            'reference_type' => 'App\\Models\\BetTicket',
+            'description'    => $description,
+        ]);
+    }
+
+    /**
+     * Règlement gagnant : déverrouille la mise + crédite le gain net.
+     */
+    public function settleTicketWin(int $lockedAmount, int $netPayout, string $description = '', ?string $reference = null): WalletTransaction
+    {
+        $before = $this->balance;
+        $this->decrement('locked_amount', $lockedAmount);
+        $this->increment('balance', $netPayout);
+        $this->increment('total_won', $netPayout - $lockedAmount); // profit réel
+        $this->refresh();
+
+        return $this->transactions()->create([
+            'type'           => 'bet_settlement',
+            'amount'         => $netPayout,
+            'balance_before' => $before,
+            'balance_after'  => $this->balance,
+            'reference'      => $reference,
+            'reference_type' => 'App\\Models\\BetTicket',
+            'description'    => $description,
+        ]);
+    }
+
+    /**
+     * Règlement perdant : déverrouille la mise (qui reste perdue).
+     */
+    public function settleTicketLoss(int $lockedAmount, string $description = '', ?string $reference = null): WalletTransaction
+    {
+        $before = $this->balance;
+        $this->decrement('locked_amount', $lockedAmount);
+        $this->refresh();
+
+        return $this->transactions()->create([
+            'type'           => 'bet_settlement',
+            'amount'         => $lockedAmount,
+            'balance_before' => $before,
+            'balance_after'  => $this->balance,
+            'reference'      => $reference,
+            'reference_type' => 'App\\Models\\BetTicket',
+            'description'    => '[PERTE] ' . $description,
+        ]);
+    }
 }

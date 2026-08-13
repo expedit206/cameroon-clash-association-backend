@@ -100,16 +100,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments/status/{reference}', [\App\Http\Controllers\NotchPayController::class, 'getPaymentStatus']);
 
     // ═══════════════════════════════════════════════════════════════
-    // ─── CCA CLASH BET ─── Marchés de Prédiction Communautaire ────
+    // ─── CCA CLASH BET P2P ─── Marketplace de Tickets ─────────────
     // ═══════════════════════════════════════════════════════════════
 
-    // Marchés & Paris (utilisateur)
+    // Marketplace & Tickets (utilisateur)
     Route::prefix('clash-bet')->group(function () {
-        Route::get('/markets', [\App\Http\Controllers\ClashBet\BetController::class, 'markets']);
-        Route::get('/markets/preview-odds', [\App\Http\Controllers\ClashBet\BetController::class, 'previewOdds']);
-        Route::get('/markets/{market}', [\App\Http\Controllers\ClashBet\BetController::class, 'show']);
-        Route::post('/bets', [\App\Http\Controllers\ClashBet\BetController::class, 'placeBet']);
-        Route::get('/my-bets', [\App\Http\Controllers\ClashBet\BetController::class, 'myBets']);
+        // Marchés et présentation
+        Route::get('/matches', [\App\Http\Controllers\ClashBet\TicketController::class, 'matches']);
+        Route::get('/markets/{market}', [\App\Http\Controllers\ClashBet\TicketController::class, 'showMarket']);
+        Route::get('/markets/{market}/tickets', [\App\Http\Controllers\ClashBet\TicketController::class, 'ticketsForMarket']);
+
+        // Tickets P2P
+        Route::post('/tickets', [\App\Http\Controllers\ClashBet\TicketController::class, 'create']);
+        Route::post('/tickets/{ticket}/match', [\App\Http\Controllers\ClashBet\TicketController::class, 'match']);
+        Route::post('/tickets/{ticket}/cancel', [\App\Http\Controllers\ClashBet\TicketController::class, 'cancel']);
+        Route::get('/my-tickets', [\App\Http\Controllers\ClashBet\TicketController::class, 'myTickets']);
+        Route::get('/tickets/{ticket}', [\App\Http\Controllers\ClashBet\TicketController::class, 'show']);
 
         // CCA Wallet
         Route::get('/wallet', [\App\Http\Controllers\ClashBet\WalletController::class, 'show']);
@@ -122,15 +128,24 @@ Route::middleware('auth:sanctum')->group(function () {
     // Administration Clash Bet
     Route::middleware('can:admin')->prefix('admin/clash-bet')->group(function () {
         Route::get('/stats', [\App\Http\Controllers\Admin\AdminBetController::class, 'stats']);
+        Route::get('/settings', [\App\Http\Controllers\Admin\AdminBetController::class, 'settings']);
+        Route::put('/settings', [\App\Http\Controllers\Admin\AdminBetController::class, 'updateSettings']);
         Route::get('/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'markets']);
         Route::post('/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'createMarket']);
+        Route::post('/markets/builder', [\App\Http\Controllers\Admin\AdminBetController::class, 'createMarketBuilder']);
+        Route::post('/markets/simulate', [\App\Http\Controllers\Admin\AdminBetController::class, 'simulateRule']);
+        Route::post('/markets/bulk-generate', [\App\Http\Controllers\Admin\AdminBetController::class, 'bulkGenerate']);
         Route::put('/markets/{market}/status', [\App\Http\Controllers\Admin\AdminBetController::class, 'updateStatus']);
         Route::post('/markets/{market}/settle', [\App\Http\Controllers\Admin\AdminBetController::class, 'settle']);
+        Route::post('/markets/{market}/settle-auto', [\App\Http\Controllers\Admin\AdminBetController::class, 'settleAuto']);
         Route::post('/markets/{market}/cancel', [\App\Http\Controllers\Admin\AdminBetController::class, 'cancel']);
+        Route::get('/tickets', [\App\Http\Controllers\Admin\AdminBetController::class, 'tickets']);
         Route::get('/available-matches', [\App\Http\Controllers\Admin\AdminBetController::class, 'availableMatches']);
         Route::get('/withdrawals', [\App\Http\Controllers\Admin\AdminBetController::class, 'withdrawals']);
+        Route::get('/audits', [\App\Http\Controllers\Admin\AdminBetController::class, 'audits']);
         Route::put('/withdrawals/{withdrawal}/process', [\App\Http\Controllers\Admin\AdminBetController::class, 'processWithdrawal']);
     });
+
 });
 
 

@@ -11,6 +11,13 @@ class BetMarket extends Model
 
     protected $fillable = [
         'match_id',
+        'title',
+        'description',
+        'category',
+        'rule_definition',
+        'rule_version',
+        'evaluation_snapshot',
+        'winning_side',
         'status',
         'liquidity_weight',
         'total_pool',
@@ -19,9 +26,12 @@ class BetMarket extends Model
     ];
 
     protected $casts = [
-        'liquidity_weight'  => 'integer',
-        'total_pool'        => 'integer',
-        'betting_closes_at' => 'datetime',
+        'liquidity_weight'    => 'integer',
+        'total_pool'          => 'integer',
+        'rule_version'        => 'integer',
+        'rule_definition'     => 'array',
+        'evaluation_snapshot' => 'array',
+        'betting_closes_at'   => 'datetime',
     ];
 
     /**
