@@ -54,8 +54,9 @@ class AdminBetController extends Controller
     {
         $markets = BetMarket::with(['match.clanHome', 'match.clanAway', 'options'])
             ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->orderByRaw("CASE WHEN status = 'open' THEN 1 WHEN status = 'suspended' THEN 2 WHEN status = 'settled' THEN 3 WHEN status = 'cancelled' THEN 4 ELSE 5 END ASC")
             ->latest()
-            ->paginate(20);
+            ->paginate(10);
 
         $markets->getCollection()->transform(function ($market) {
             return [
@@ -189,6 +190,48 @@ class AdminBetController extends Controller
         try {
             $count = $this->ticketService->cancelMarket($market, $request->reason);
             return response()->json(['success' => true, 'refunded' => $count, 'message' => "{$count} ticket(s) remboursé(s) intégralement."]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * DELETE /admin/clash-bet/markets/{market}
+     * Supprimer définitivement un marché et rembourser ses tickets s'il y en a.
+     */
+    public function destroyMarket(BetMarket $market)
+    {
+        try {
+            $openTicketsCount = BetTicket::where('market_id', $market->id)
+                ->whereNotIn('status', ['settled', 'cancelled'])
+                ->count();
+
+            if ($openTicketsCount > 0) {
+                $this->ticketService->cancelMarket($market, "Suppression du marché par un administrateur.");
+            }
+
+            BetOption::where('market_id', $market->id)->delete();
+            BetTicket::where('market_id', $market->id)->delete();
+
+            $marketId = $market->id;
+            $marketTitle = $market->title;
+            $market->delete();
+
+            ClashBetAudit::create([
+                'admin_id'   => Auth::id(),
+                'event_type' => 'MARKET_DELETED',
+                'market_id'  => $marketId,
+                'payload'    => [
+                    'market_id'        => $marketId,
+                    'title'            => $marketTitle,
+                    'refunded_tickets' => $openTicketsCount,
+                ],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Marché #{$marketId} supprimé définitivement. {$openTicketsCount} ticket(s) remboursé(s).",
+            ]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
