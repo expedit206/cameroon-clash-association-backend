@@ -154,11 +154,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/matches/{match}/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
         Route::post('/matches/{match}/delete-markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
         Route::get('/tickets', [\App\Http\Controllers\Admin\AdminBetController::class, 'tickets']);
+        Route::post('/tickets/{ticket}/settle', [\App\Http\Controllers\Admin\AdminBetController::class, 'settleTicket']);
         Route::get('/available-matches', [\App\Http\Controllers\Admin\AdminBetController::class, 'availableMatches']);
         Route::get('/withdrawals', [\App\Http\Controllers\Admin\AdminBetController::class, 'withdrawals']);
         Route::get('/audits', [\App\Http\Controllers\Admin\AdminBetController::class, 'audits']);
         Route::put('/withdrawals/{withdrawal}/process', [\App\Http\Controllers\Admin\AdminBetController::class, 'processWithdrawal']);
     });
+
 
 });
 

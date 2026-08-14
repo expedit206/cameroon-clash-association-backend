@@ -343,6 +343,86 @@ class ClashBetTicketService
         });
     }
 
+    /**
+     * Règle ou départage un TICKET INDIVIDUEL manuellement par l'administrateur.
+     * $outcome can be 'creator', 'taker', or 'refund'
+     */
+    public function settleSingleTicket(BetTicket $ticket, string $outcome, ?User $admin = null, ?string $reason = null): array
+    {
+        return DB::transaction(function () use ($ticket, $outcome, $admin, $reason) {
+            $ticket = BetTicket::lockForUpdate()->with(['creator', 'taker'])->findOrFail($ticket->id);
+
+            if ($ticket->status === 'settled') {
+                throw new \Exception("Ce ticket #{$ticket->ticket_number} est déjà réglé.");
+            }
+
+            if ($outcome === 'refund' || $outcome === 'draw') {
+                $this->refundSingleTicket($ticket, $reason ?? "Départage admin : Égalité / Annulation");
+                return [
+                    'success' => true,
+                    'status' => 'refunded',
+                    'message' => "Ticket #{$ticket->ticket_number} annulé et remboursé aux deux joueurs.",
+                ];
+            }
+
+            $creatorWon = ($outcome === 'creator' || (is_numeric($outcome) && (int)$outcome === $ticket->creator_id));
+            $winner = $creatorWon ? $ticket->creator : $ticket->taker;
+            $loser  = $creatorWon ? $ticket->taker   : $ticket->creator;
+
+            if (!$winner) {
+                throw new \Exception("Le gagnant sélectionné n'est pas valide pour ce ticket.");
+            }
+
+            // Créditer le gagnant
+            $winnerWallet = $winner->getOrCreateWallet();
+            $winnerWallet->settleTicketWin(
+                $ticket->amount,
+                $ticket->net_payout,
+                "Gain départage admin ticket #{$ticket->ticket_number}"
+            );
+
+            // Déverrouiller la mise du perdant s'il existe
+            if ($loser) {
+                $loserWallet = $loser->getOrCreateWallet();
+                $loserWallet->settleTicketLoss(
+                    $ticket->amount,
+                    "Mise perdue ticket #{$ticket->ticket_number}"
+                );
+            }
+
+            $ticket->update([
+                'status'     => 'settled',
+                'winner_id'  => $winner->id,
+                'settled_at' => now(),
+            ]);
+
+            \App\Models\ClashBetAudit::create([
+                'admin_id'   => $admin?->id ?? \Illuminate\Support\Facades\Auth::id(),
+                'event_type' => 'TICKET_SETTLED_MANUALLY',
+                'market_id'  => $ticket->market_id,
+                'payload'    => [
+                    'ticket_id'     => $ticket->id,
+                    'ticket_number' => $ticket->ticket_number,
+                    'outcome'       => $outcome,
+                    'winner_id'     => $winner->id,
+                    'winner_name'   => $winner->name,
+                    'reason'        => $reason,
+                ],
+            ]);
+
+            Log::info("Clash Bet P2P: Ticket #{$ticket->ticket_number} tranché manuellement par Admin #{$admin?->id} — Gagnant User #{$winner->id} ({$winner->name})");
+
+            return [
+                'success' => true,
+                'status' => 'settled',
+                'winner_id' => $winner->id,
+                'winner_name' => $winner->name,
+                'message' => "Ticket #{$ticket->ticket_number} tranché en faveur de {$winner->name}.",
+            ];
+        });
+    }
+
+
     // ─── Annulation d'un Marché ───────────────────────────────────────────────
 
     /**

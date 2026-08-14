@@ -137,4 +137,56 @@ class ThirdPlaceAndTiebreakTest extends TestCase
 
         $this->assertEquals(0, BetMarket::where('match_id', $match->id)->count());
     }
+
+    public function test_admin_can_settle_single_ticket()
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $creator = User::factory()->create();
+        $taker = User::factory()->create();
+
+        $comp = Competition::create(['name' => 'Test Comp', 'season' => 1, 'status' => 'active']);
+        $c1 = Clan::create(['name' => 'Clan 1', 'tag_coc' => '#C1', 'status' => 'validated']);
+        $c2 = Clan::create(['name' => 'Clan 2', 'tag_coc' => '#C2', 'status' => 'validated']);
+
+        $match = TournamentMatch::create([
+            'competition_id' => $comp->id,
+            'phase' => 'group_stage',
+            'clan_home_id' => $c1->id,
+            'clan_away_id' => $c2->id,
+            'status' => 'scheduled',
+        ]);
+
+        $market = BetMarket::create([
+            'match_id' => $match->id,
+            'title' => 'Duel HDV16 Player A vs Player B',
+            'category' => 'duel',
+            'status' => 'open',
+        ]);
+
+        $ticket = \App\Models\BetTicket::create([
+            'ticket_number' => \App\Models\BetTicket::generateTicketNumber(),
+            'market_id' => $market->id,
+            'creator_id' => $creator->id,
+            'taker_id' => $taker->id,
+            'side' => 'YES',
+            'amount' => 5000,
+            'odds' => 2.0,
+            'gross_payout' => 10000,
+            'commission_amount' => 0,
+            'net_payout' => 10000,
+            'status' => 'matched',
+        ]);
+
+        // Trancher en faveur du créateur
+        $response = $this->actingAs($admin)->postJson("/api/admin/clash-bet/tickets/{$ticket->id}/settle", [
+            'outcome' => 'creator',
+            'reason' => 'Victoire confirmée par vidéo du duel HDV16',
+        ]);
+
+        $response->assertStatus(200);
+        $ticket->refresh();
+        $this->assertEquals('settled', $ticket->status);
+        $this->assertEquals($creator->id, $ticket->winner_id);
+    }
 }
+

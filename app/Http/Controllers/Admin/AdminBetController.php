@@ -337,12 +337,17 @@ class AdminBetController extends Controller
             'id'                    => $t->id,
             'ticket_number'         => $t->ticket_number,
             'status'                => $t->status,
+            'side'                  => $t->side,
+            'market_id'             => $t->market_id,
+            'market_title'          => $t->market?->title,
             'amount'                => $t->amount,
             'gross_payout'          => $t->gross_payout,
             'commission_amount'     => $t->commission_amount,
             'net_payout'            => $t->net_payout,
             'risk_score'            => $t->risk_score,
             'review_required'       => $t->review_required,
+            'creator_id'            => $t->creator_id,
+            'taker_id'              => $t->taker_id,
             'creator'               => ['id' => $t->creator?->id, 'name' => $t->creator?->name],
             'taker'                 => $t->taker_id ? ['id' => $t->taker?->id, 'name' => $t->taker?->name] : null,
             'creator_option'        => $t->creatorOption?->label,
@@ -359,6 +364,32 @@ class AdminBetController extends Controller
 
         return response()->json($tickets);
     }
+
+    /**
+     * POST /admin/clash-bet/tickets/{ticket}/settle
+     * Tranche manuellement le résultat d'un ticket (créateur gagne, preneur gagne, ou remboursement/égalité).
+     */
+    public function settleTicket(Request $request, BetTicket $ticket)
+    {
+        $request->validate([
+            'outcome' => 'required|string|in:creator,taker,refund,draw',
+            'reason'  => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $result = $this->ticketService->settleSingleTicket(
+                $ticket,
+                $request->outcome,
+                Auth::user(),
+                $request->reason
+            );
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 400);
+        }
+    }
+
 
     // ─── Configuration ────────────────────────────────────────────────────────
 
