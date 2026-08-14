@@ -94,6 +94,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/competitions/{competition}/group-standings', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'groupStandings']);
         Route::post('/admin/competitions/{competition}/generate-group-matches', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateGroupMatches']);
         Route::post('/admin/competitions/{competition}/generate-semi-finals', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateSemiFinals']);
+        Route::post('/admin/competitions/{competition}/generate-third-place', [\App\Http\Controllers\Admin\AdminTournamentController::class, 'generateThirdPlaceMatch']);
     });
 
     // --- Suivi des Paiements Utilisateur ---
@@ -150,6 +151,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/markets/{market}/cancel', [\App\Http\Controllers\Admin\AdminBetController::class, 'cancel']);
         Route::delete('/markets/{market}', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
         Route::post('/markets/{market}/delete', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
+        Route::delete('/matches/{match}/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
+        Route::post('/matches/{match}/delete-markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
         Route::get('/tickets', [\App\Http\Controllers\Admin\AdminBetController::class, 'tickets']);
         Route::get('/available-matches', [\App\Http\Controllers\Admin\AdminBetController::class, 'availableMatches']);
         Route::get('/withdrawals', [\App\Http\Controllers\Admin\AdminBetController::class, 'withdrawals']);

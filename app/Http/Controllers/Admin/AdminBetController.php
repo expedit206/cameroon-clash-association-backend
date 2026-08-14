@@ -273,6 +273,52 @@ class AdminBetController extends Controller
         }
     }
 
+    /**
+     * DELETE /admin/clash-bet/matches/{match}/markets
+     * Supprime tous les marchés P2P associés à un match donné.
+     */
+    public function destroyMatchMarkets(TournamentMatch $match)
+    {
+        try {
+            $markets = BetMarket::where('match_id', $match->id)->get();
+            $count = $markets->count();
+            $totalRefunded = 0;
+
+            foreach ($markets as $market) {
+                $openTicketsCount = BetTicket::where('market_id', $market->id)
+                    ->whereNotIn('status', ['settled', 'cancelled'])
+                    ->count();
+
+                if ($openTicketsCount > 0) {
+                    $this->ticketService->cancelMarket($market, "Suppression globale des marchés du match #{$match->id}.");
+                    $totalRefunded += $openTicketsCount;
+                }
+
+                BetOption::where('market_id', $market->id)->delete();
+                BetTicket::where('market_id', $market->id)->delete();
+                $market->delete();
+            }
+
+            ClashBetAudit::create([
+                'admin_id'   => Auth::id(),
+                'event_type' => 'MATCH_MARKETS_DELETED',
+                'market_id'  => null,
+                'payload'    => [
+                    'match_id'         => $match->id,
+                    'deleted_count'    => $count,
+                    'refunded_tickets' => $totalRefunded,
+                ],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "{$count} marché(s) lié(s) au match #{$match->id} supprimé(s). {$totalRefunded} ticket(s) remboursé(s).",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
     // ─── Gestion des Tickets ──────────────────────────────────────────────────
 
     /**

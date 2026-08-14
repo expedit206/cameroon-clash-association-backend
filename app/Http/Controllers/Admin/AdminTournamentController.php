@@ -44,6 +44,7 @@ class AdminTournamentController extends Controller
             'total_destruction_home' => 'nullable|numeric|min:0|max:100',
             'total_destruction_away' => 'nullable|numeric|min:0|max:100',
             'status' => 'nullable|string|in:scheduled,in_progress,completed,forfeit',
+            'winner_clan_id' => 'nullable|exists:clans,id',
             'scheduled_at' => 'nullable|date',
         ]);
 
@@ -58,18 +59,22 @@ class AdminTournamentController extends Controller
             'match_number',
         ]));
 
-        // Logique auto pour le vainqueur si complété
+        // Logique du vainqueur si complété : priorité au départage explicite par l'admin (winner_clan_id)
         if ($match->status === 'completed') {
-            if ($match->total_stars_home > $match->total_stars_away) {
-                $match->winner_clan_id = $match->clan_home_id;
-            } elseif ($match->total_stars_away > $match->total_stars_home) {
-                $match->winner_clan_id = $match->clan_away_id;
+            if ($request->has('winner_clan_id') && $request->winner_clan_id) {
+                $match->winner_clan_id = $request->winner_clan_id;
             } else {
-                // Egalité aux étoiles, on regarde le %
-                if ($match->total_destruction_home > $match->total_destruction_away) {
+                if ($match->total_stars_home > $match->total_stars_away) {
                     $match->winner_clan_id = $match->clan_home_id;
-                } else {
+                } elseif ($match->total_stars_away > $match->total_stars_home) {
                     $match->winner_clan_id = $match->clan_away_id;
+                } else {
+                    // Egalité aux étoiles, on regarde le %
+                    if ($match->total_destruction_home > $match->total_destruction_away) {
+                        $match->winner_clan_id = $match->clan_home_id;
+                    } else {
+                        $match->winner_clan_id = $match->clan_away_id;
+                    }
                 }
             }
             $match->validated_by = $request->user()->id;
@@ -80,6 +85,33 @@ class AdminTournamentController extends Controller
             if ($match->round && $match->phase !== 'group_stage') {
                 $service = new \App\Services\BracketGeneratorService();
                 $service->advanceTournament($match->competition, $match->round);
+            }
+
+            // Si c'est une demi-finale qui se termine, mettre à jour automatiquement la Grande Finale si les 2 demi-finales sont achevées
+            if ($match->phase === 'semi_final') {
+                $semiFinals = \App\Models\TournamentMatch::where('competition_id', $match->competition_id)
+                    ->where('phase', 'semi_final')
+                    ->get();
+                if ($semiFinals->count() >= 2 && $semiFinals->where('status', 'completed')->count() >= 2) {
+                    $sf1 = $semiFinals->firstWhere('match_number', 1) ?? $semiFinals->first();
+                    $sf2 = $semiFinals->firstWhere('match_number', 2) ?? $semiFinals->skip(1)->first();
+
+                    if ($sf1->winner_clan_id && $sf2->winner_clan_id) {
+                        \App\Models\TournamentMatch::updateOrCreate(
+                            [
+                                'competition_id' => $match->competition_id,
+                                'phase'          => 'final',
+                            ],
+                            [
+                                'round'        => 4,
+                                'match_number' => 1,
+                                'clan_home_id' => $sf1->winner_clan_id,
+                                'clan_away_id' => $sf2->winner_clan_id,
+                                'status'       => 'scheduled',
+                            ]
+                        );
+                    }
+                }
             }
         }
 
@@ -123,7 +155,7 @@ class AdminTournamentController extends Controller
         $request->validate([
             'clan_home_id' => 'required|exists:clans,id',
             'clan_away_id' => 'required|exists:clans,id|different:clan_home_id',
-            'phase' => 'required|string|in:group_stage,semi_final,final',
+            'phase' => 'required|string|in:group_stage,semi_final,third_place,final',
             'group' => 'nullable|string|in:A,B',
             'round' => 'nullable|integer',
             'match_number' => 'nullable|integer',
@@ -320,6 +352,67 @@ class AdminTournamentController extends Controller
         return response()->json([
             'message' => 'Demi-Finales générées avec succès ! Affiches : ' . $a1['clan_name'] . ' vs ' . $b2['clan_name'] . ' & ' . $b1['clan_name'] . ' vs ' . $a2['clan_name'],
             'semi_finals' => [$sf1->load(['clanHome', 'clanAway']), $sf2->load(['clanHome', 'clanAway'])],
+        ]);
+    }
+
+    /**
+     * Génère automatiquement le match pour la 3ème place (Petite Finale) entre les deux perdants des demi-finales.
+     */
+    public function generateThirdPlaceMatch(Competition $competition)
+    {
+        $semiFinals = \App\Models\TournamentMatch::where('competition_id', $competition->id)
+            ->where('phase', 'semi_final')
+            ->get();
+
+        if ($semiFinals->count() < 2) {
+            return response()->json([
+                'message' => 'Les 2 demi-finales doivent être générées avant de pouvoir créer le match pour la 3ème place.'
+            ], 422);
+        }
+
+        $completedCount = $semiFinals->where('status', 'completed')->count();
+        if ($completedCount < 2) {
+            return response()->json([
+                'message' => 'Les 2 demi-finales doivent être terminées (statut completé) pour déterminer les perdants.'
+            ], 422);
+        }
+
+        $sf1 = $semiFinals->firstWhere('match_number', 1) ?? $semiFinals->first();
+        $sf2 = $semiFinals->firstWhere('match_number', 2) ?? $semiFinals->skip(1)->first();
+
+        // Determiner les perdants de chaque demi-finale
+        $loser1_id = ($sf1->winner_clan_id == $sf1->clan_home_id) ? $sf1->clan_away_id : $sf1->clan_home_id;
+        $loser2_id = ($sf2->winner_clan_id == $sf2->clan_home_id) ? $sf2->clan_away_id : $sf2->clan_home_id;
+
+        if (!$loser1_id || !$loser2_id) {
+            return response()->json([
+                'message' => 'Impossible de déterminer les perdants des demi-finales. Vérifiez les vainqueurs des demi-finales.'
+            ], 422);
+        }
+
+        $existing3rd = \App\Models\TournamentMatch::where('competition_id', $competition->id)
+            ->where('phase', 'third_place')
+            ->first();
+
+        $matchNumber = $existing3rd ? $existing3rd->match_number : (\App\Models\TournamentMatch::where('competition_id', $competition->id)->max('match_number') + 1);
+
+        $match3rd = \App\Models\TournamentMatch::updateOrCreate(
+            [
+                'competition_id' => $competition->id,
+                'phase' => 'third_place',
+            ],
+            [
+                'round' => 3,
+                'match_number' => $matchNumber,
+                'clan_home_id' => $loser1_id,
+                'clan_away_id' => $loser2_id,
+                'status' => 'scheduled',
+            ]
+        );
+
+        return response()->json([
+            'message' => 'Match pour la 3ème place généré avec succès ! Affiche : ' . ($match3rd->clanHome?->name ?? 'Clan 1') . ' vs ' . ($match3rd->clanAway?->name ?? 'Clan 2'),
+            'match' => $match3rd->load(['clanHome', 'clanAway']),
         ]);
     }
 }
