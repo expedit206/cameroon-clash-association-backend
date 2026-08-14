@@ -23,6 +23,7 @@ class BetMarket extends Model
         'total_pool',
         'cancelled_reason',
         'betting_closes_at',
+        'allow_during_match',
     ];
 
     protected $casts = [
@@ -32,6 +33,7 @@ class BetMarket extends Model
         'rule_definition'     => 'array',
         'evaluation_snapshot' => 'array',
         'betting_closes_at'   => 'datetime',
+        'allow_during_match'  => 'boolean',
     ];
 
     /**
@@ -86,7 +88,7 @@ class BetMarket extends Model
         if ($this->status !== 'open') {
             return false;
         }
-        if ($this->betting_closes_at && now()->gte($this->betting_closes_at)) {
+        if (!$this->allow_during_match && $this->betting_closes_at && now()->gte($this->betting_closes_at)) {
             return false;
         }
         return true;

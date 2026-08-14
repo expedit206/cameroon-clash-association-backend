@@ -24,6 +24,17 @@ class BetController extends Controller
      */
     public function markets(Request $request)
     {
+        $publicEnabled = \App\Models\AppSetting::clashBetPublicEnabled();
+        $isAdmin = Auth::check() && (Auth::user()->is_admin || Auth::user()->role === 'admin');
+
+        if (!$publicEnabled && !$isAdmin) {
+            return response()->json([
+                'public_enabled' => false,
+                'data'           => [],
+                'message'        => 'Le Clash Bet P2P est actuellement fermé au public.',
+            ]);
+        }
+
         $markets = BetMarket::open()
             ->withDetails()
             ->latest()

@@ -17,7 +17,22 @@ class TicketController extends Controller
         private readonly ClashBetTicketService $ticketService
     ) {}
 
-    // ─── Marketplace ─────────────────────────────────────────────────────────
+    private function checkPublicAccess(): ?\Illuminate\Http\JsonResponse
+    {
+        $publicEnabled = AppSetting::clashBetPublicEnabled();
+        $isAdmin = Auth::check() && (Auth::user()->is_admin || Auth::user()->role === 'admin');
+
+        if (!$publicEnabled && !$isAdmin) {
+            return response()->json([
+                'success' => false,
+                'public_enabled' => false,
+                'message' => 'Le module Clash Bet P2P est actuellement désactivé par l\'administration.',
+                'data' => [],
+            ], 403);
+        }
+
+        return null;
+    }
 
     /**
      * GET /clash-bet/matches
@@ -25,6 +40,10 @@ class TicketController extends Controller
      */
     public function matches(Request $request)
     {
+        if ($accessDenied = $this->checkPublicAccess()) {
+            return $accessDenied;
+        }
+
         $markets = BetMarket::with(['match.clanHome', 'match.clanAway', 'options'])
             ->where('status', 'open')
             ->latest()

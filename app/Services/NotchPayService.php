@@ -24,9 +24,13 @@ class NotchPayService
     public function initializePayment(array $data)
     {
         try {
+            $email = filter_var($data['email'] ?? '', FILTER_VALIDATE_EMAIL) 
+                ? $data['email'] 
+                : 'player@clashkamer.com';
+
             $response = NotchPayment::initialize([
                 'amount' => $data['amount'],
-                'email' => $data['email'],
+                'email' => $email,
                 'currency' => $data['currency'] ?? 'XAF',
                 'reference' => $data['reference'],
                 'callback' => env('NOTCHPAY_CALLBACK_URL', url('/api/notchpay/callback')),

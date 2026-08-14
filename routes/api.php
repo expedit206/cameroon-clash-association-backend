@@ -105,6 +105,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Marketplace & Tickets (utilisateur)
     Route::prefix('clash-bet')->group(function () {
+        // Configuration publique (visibilité BDD)
+        Route::get('/public-settings', function() {
+            return response()->json([
+                'clash_bet_public_enabled' => \App\Models\AppSetting::clashBetPublicEnabled(),
+            ]);
+        });
+
         // Marchés et présentation
         Route::get('/matches', [\App\Http\Controllers\ClashBet\TicketController::class, 'matches']);
         Route::get('/markets/{market}', [\App\Http\Controllers\ClashBet\TicketController::class, 'showMarket']);
@@ -136,10 +143,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/markets/simulate', [\App\Http\Controllers\Admin\AdminBetController::class, 'simulateRule']);
         Route::post('/markets/bulk-generate', [\App\Http\Controllers\Admin\AdminBetController::class, 'bulkGenerate']);
         Route::put('/markets/{market}/status', [\App\Http\Controllers\Admin\AdminBetController::class, 'updateStatus']);
+        Route::put('/markets/{market}/live-toggle', [\App\Http\Controllers\Admin\AdminBetController::class, 'toggleLiveBetting']);
         Route::post('/markets/{market}/settle', [\App\Http\Controllers\Admin\AdminBetController::class, 'settle']);
         Route::post('/markets/{market}/settle-auto', [\App\Http\Controllers\Admin\AdminBetController::class, 'settleAuto']);
         Route::post('/markets/{market}/cancel', [\App\Http\Controllers\Admin\AdminBetController::class, 'cancel']);
         Route::delete('/markets/{market}', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
+        Route::post('/markets/{market}/delete', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
         Route::get('/tickets', [\App\Http\Controllers\Admin\AdminBetController::class, 'tickets']);
         Route::get('/available-matches', [\App\Http\Controllers\Admin\AdminBetController::class, 'availableMatches']);
         Route::get('/withdrawals', [\App\Http\Controllers\Admin\AdminBetController::class, 'withdrawals']);

@@ -18,6 +18,22 @@ class WalletController extends Controller
         private readonly NotchPayService $notchPayService
     ) {}
 
+    private function checkPublicAccess(): ?\Illuminate\Http\JsonResponse
+    {
+        $publicEnabled = AppSetting::clashBetPublicEnabled();
+        $isAdmin = Auth::check() && (Auth::user()->is_admin || Auth::user()->role === 'admin');
+
+        if (!$publicEnabled && !$isAdmin) {
+            return response()->json([
+                'success' => false,
+                'public_enabled' => false,
+                'message' => 'Le module Clash Bet P2P est actuellement désactivé par l\'administration.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     /**
      * GET /clash-bet/wallet
      * Solde et informations du wallet de l'utilisateur.
@@ -64,11 +80,13 @@ class WalletController extends Controller
      */
     public function deposit(Request $request)
     {
+        if ($accessDenied = $this->checkPublicAccess()) {
+            return $accessDenied;
+        }
+
         $request->validate([
             'amount'         => 'required|integer|min:100|max:50000',
-            'phone_number'   => 'required|string|min:8|max:15',
-            'payment_method' => 'required|in:mtn_momo,orange_money',
-            'email'          => 'required|email',
+            'payment_method' => 'nullable|string',
         ]);
 
         $user      = Auth::user();
@@ -78,7 +96,7 @@ class WalletController extends Controller
         try {
             $response = $this->notchPayService->initializePayment([
                 'amount'      => $amount,
-                'email'       => $request->email,
+                'email'       => $user->email ?? 'player@clashkamer.com',
                 'currency'    => 'XAF',
                 'reference'   => $reference,
                 'description' => "CCA Wallet {$user->name}",
@@ -145,8 +163,13 @@ class WalletController extends Controller
      */
     public function withdraw(Request $request)
     {
+        if ($accessDenied = $this->checkPublicAccess()) {
+            return $accessDenied;
+        }
+
         $request->validate([
-            'amount'         => "required|integer|min:" . self::MIN_WITHDRAWAL,
+            'amount'         => 'required|integer|min:100',
+            'account_name'   => 'required|string|min:3|max:100',
             'phone_number'   => 'required|string|min:8|max:15',
             'payment_method' => 'required|in:mtn_momo,orange_money',
         ]);
@@ -182,6 +205,7 @@ class WalletController extends Controller
         $withdrawal = \Illuminate\Support\Facades\DB::transaction(function () use ($user, $wallet, $amount, $fee, $netAmount, $request) {
             $withdrawal = Withdrawal::create([
                 'user_id'        => $user->id,
+                'account_name'   => $request->account_name,
                 'amount'         => $amount,
                 'fee'            => $fee,
                 'net_amount'     => $netAmount,
@@ -190,10 +214,11 @@ class WalletController extends Controller
                 'status'         => 'pending',
             ]);
 
+            $feePercentage = AppSetting::clashBetWithdrawalFee();
             $wallet->debitForWithdrawal(
                 $amount,
                 $fee,
-                "Retrait Mobile Money — Frais 7%: {$fee} FCFA",
+                "Retrait Mobile Money — Frais {$feePercentage}%: {$fee} FCFA",
                 (string) $withdrawal->id
             );
 

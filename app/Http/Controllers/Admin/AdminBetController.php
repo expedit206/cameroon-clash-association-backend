@@ -53,7 +53,8 @@ class AdminBetController extends Controller
     public function markets(Request $request)
     {
         $markets = BetMarket::with(['match.clanHome', 'match.clanAway', 'options'])
-            ->when($request->status, fn($q) => $q->where('status', $request->status))
+            ->when($request->status && $request->status !== 'all', fn($q) => $q->where('status', $request->status))
+            ->when($request->category && $request->category !== 'all', fn($q) => $q->where('category', $request->category))
             ->orderByRaw("CASE WHEN status = 'open' THEN 1 WHEN status = 'suspended' THEN 2 WHEN status = 'settled' THEN 3 WHEN status = 'cancelled' THEN 4 ELSE 5 END ASC")
             ->latest()
             ->paginate(10);
@@ -61,13 +62,23 @@ class AdminBetController extends Controller
         $markets->getCollection()->transform(function ($market) {
             return [
                 'id'                => $market->id,
+                'title'             => $market->title,
+                'description'       => $market->description,
+                'category'          => $market->category,
+                'rule_definition'   => $market->rule_definition,
+                'rule_version'      => $market->rule_version,
+                'winning_side'      => $market->winning_side,
+                'winning_option_id' => $market->winning_option_id,
                 'status'            => $market->status,
+                'total_pool'        => $market->total_pool,
                 'betting_closes_at' => $market->betting_closes_at?->toISOString(),
                 'cancelled_reason'  => $market->cancelled_reason,
                 'match' => [
                     'id'           => $market->match?->id,
-                    'home'         => $market->match?->clanHome?->name,
-                    'away'         => $market->match?->clanAway?->name,
+                    'clan_home'    => $market->match?->clanHome?->name ?? 'Clan Hôte',
+                    'clan_away'    => $market->match?->clanAway?->name ?? 'Clan Invité',
+                    'home'         => $market->match?->clanHome?->name ?? 'Clan Hôte',
+                    'away'         => $market->match?->clanAway?->name ?? 'Clan Invité',
                     'status'       => $market->match?->status,
                     'scheduled_at' => $market->match?->scheduled_at?->toISOString(),
                 ],
@@ -145,6 +156,31 @@ class AdminBetController extends Controller
         ]);
 
         return response()->json(['success' => true, 'market' => $market]);
+    }
+
+    /**
+     * PUT /admin/clash-bet/markets/{market}/live-toggle
+     */
+    public function toggleLiveBetting(Request $request, BetMarket $market)
+    {
+        $request->validate([
+            'allow_during_match' => 'nullable|boolean',
+        ]);
+
+        $allow = $request->has('allow_during_match')
+            ? $request->boolean('allow_during_match')
+            : !$market->allow_during_match;
+
+        $market->update([
+            'allow_during_match' => $allow,
+        ]);
+
+        return response()->json([
+            'success'            => true,
+            'market'             => $market,
+            'allow_during_match' => $allow,
+            'message'            => $allow ? 'Marché maintenu ouvert pendant le match.' : 'Marché avec fermeture standard.',
+        ]);
     }
 
     // ─── Règlement & Annulation ───────────────────────────────────────────────
@@ -292,6 +328,7 @@ class AdminBetController extends Controller
             'clash_bet_max_amount'               => AppSetting::clashBetMaxAmount(),
             'clash_bet_fixed_odds'               => AppSetting::clashBetFixedOdds(),
             'clash_bet_withdrawal_fee_percentage'=> AppSetting::clashBetWithdrawalFee(),
+            'clash_bet_public_enabled'           => AppSetting::clashBetPublicEnabled(),
         ]);
     }
 
@@ -306,6 +343,7 @@ class AdminBetController extends Controller
             'clash_bet_min_amount'                => 'nullable|integer|min:100',
             'clash_bet_max_amount'                => 'nullable|integer|max:1000000',
             'clash_bet_withdrawal_fee_percentage' => 'nullable|numeric|min:0|max:50',
+            'clash_bet_public_enabled'            => 'nullable|boolean',
         ]);
 
         foreach ($request->only([
@@ -314,9 +352,11 @@ class AdminBetController extends Controller
             'clash_bet_min_amount',
             'clash_bet_max_amount',
             'clash_bet_withdrawal_fee_percentage',
+            'clash_bet_public_enabled',
         ]) as $key => $value) {
             if (!is_null($value)) {
-                AppSetting::set($key, (string) $value);
+                $valStr = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
+                AppSetting::set($key, $valStr);
             }
         }
 

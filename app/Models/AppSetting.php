@@ -56,4 +56,9 @@ class AppSetting extends Model
     {
         return (float) static::get('clash_bet_withdrawal_fee_percentage', 10);
     }
+
+    public static function clashBetPublicEnabled(): bool
+    {
+        return filter_var(static::get('clash_bet_public_enabled', '0'), FILTER_VALIDATE_BOOLEAN);
+    }
 }
