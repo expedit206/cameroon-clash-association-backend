@@ -131,6 +131,18 @@ class RuleEvaluatorService
                     'one_star_count'   => ($duel->stars_away === 1) ? 1 : 0,
                 ];
             }
+
+            // Dataset duel H2H indexé par hdv_level pour les marchés de type 'duel_winner'
+            $hdv = $duel->hdv_level;
+            $dataset['duel'][$hdv] = [
+                'stars_home'       => (int) ($duel->stars_home ?? 0),
+                'stars_away'       => (int) ($duel->stars_away ?? 0),
+                'destruction_home' => (float) ($duel->destruction_home ?? 0),
+                'destruction_away' => (float) ($duel->destruction_away ?? 0),
+                'winner'           => $duel->winner ?? 'draw',
+                'player_home_id'   => $duel->player_home_id,
+                'player_away_id'   => $duel->player_away_id,
+            ];
         }
 
         return $dataset;
@@ -208,6 +220,12 @@ class RuleEvaluatorService
 
         if ($subjectType === 'player') {
             return $dataset['player'][$target][$metric] ?? 0;
+        }
+
+        // Duel H2H : target = hdv_level (int), metric = winner/stars_home/stars_away/destruction_home/destruction_away
+        if ($subjectType === 'duel') {
+            $hdv = (int) $target;
+            return $dataset['duel'][$hdv][$metric] ?? 0;
         }
 
         return 0;

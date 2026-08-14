@@ -82,7 +82,7 @@ class MarketBuilderService
 
         if ($type === 'comparison') {
             $subject = $node['subject_type'] ?? null;
-            if (!in_array($subject, ['team', 'player', 'match'])) {
+            if (!in_array($subject, ['team', 'player', 'match', 'duel'])) {
                 throw new InvalidArgumentException("Sujet invalide : {$subject}");
             }
             $op = $node['operator'] ?? null;
@@ -113,7 +113,19 @@ class MarketBuilderService
             $val     = $node['value'] ?? 0;
 
             $entityName = 'Le match';
-            if ($subject === 'team') {
+            if ($subject === 'duel') {
+                $hdv = intval($target ?: 16);
+                $duel = $match->duels?->first(fn($d) => intval($d->hdv_level) === $hdv);
+                $pHome = $duel?->player_home_name ?? ($match->clanHome?->name ? "Joueur {$match->clanHome->name}" : "Joueur Hôte");
+                $pAway = $duel?->player_away_name ?? ($match->clanAway?->name ? "Joueur {$match->clanAway->name}" : "Joueur Invité");
+
+                if ($metric === 'winner') {
+                    $winnerName = ($val === 'home') ? $pHome : (($val === 'away') ? $pAway : $pHome);
+                    $loserName  = ($val === 'home') ? $pAway : $pHome;
+                    return "[Duel HDV{$hdv}] {$winnerName} remporte le duel face à {$loserName}";
+                }
+                return "[Duel HDV{$hdv}] {$pHome} VS {$pAway}";
+            } elseif ($subject === 'team') {
                 $entityName = ($target === 'home')
                     ? ($match->clanHome?->name ?? 'Clan Hôte')
                     : ($match->clanAway?->name ?? 'Clan Invité');

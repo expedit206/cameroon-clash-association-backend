@@ -320,6 +320,20 @@ class AdminBetController extends Controller
                     ])
                     : collect([]);
 
+                // Duels H2H (niveaux de jeu)
+                $duels = \App\Models\Duel::with(['playerHome', 'playerAway'])
+                    ->where('match_id', $m->id)
+                    ->orderBy('hdv_level')
+                    ->get()
+                    ->map(fn($d) => [
+                        'id'                 => $d->id,
+                        'hdv_level'          => $d->hdv_level,
+                        'player_home_id'     => $d->player_home_id,
+                        'player_home_name'   => $d->playerHome?->name ?? "Joueur HDV{$d->hdv_level} ({$m->clanHome?->name})",
+                        'player_away_id'     => $d->player_away_id,
+                        'player_away_name'   => $d->playerAway?->name ?? "Joueur HDV{$d->hdv_level} ({$m->clanAway?->name})",
+                    ]);
+
                 return [
                     'id'                => $m->id,
                     'status'            => $m->status,
@@ -333,6 +347,7 @@ class AdminBetController extends Controller
                     'clan_away_id'      => $m->clan_away_id,
                     'clan_away_badge'   => $m->clanAway?->badge_url,
                     'clan_away_players' => $awayPlayers,
+                    'duels'             => $duels,
                 ];
             });
 
@@ -406,7 +421,7 @@ class AdminBetController extends Controller
     {
         $request->validate([
             'match_id'          => 'required|exists:tournament_matches,id',
-            'category'          => 'required|in:team,player,comparison,advanced',
+            'category'          => 'required|in:team,player,comparison,duel,advanced',
             'rule_definition'   => 'required|array',
             'title'             => 'nullable|string|max:255',
             'description'       => 'nullable|string',
