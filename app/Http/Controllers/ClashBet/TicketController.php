@@ -223,6 +223,72 @@ class TicketController extends Controller
         return response()->json($this->formatTicketDetail($ticket));
     }
 
+    /**
+     * GET /clash-bet/public/tickets/{identifier}
+     * Informations publiques d'un ticket pour partage social & landing page.
+     */
+    public function showPublic(string $identifier)
+    {
+        $ticket = BetTicket::where('ticket_number', $identifier)
+            ->orWhere('id', is_numeric($identifier) ? (int) $identifier : 0)
+            ->with(['market.match.clanHome', 'market.match.clanAway', 'creator'])
+            ->first();
+
+        if (!$ticket) {
+            return response()->json(['message' => 'Ticket introuvable.'], 404);
+        }
+
+        $market = $ticket->market;
+        $match  = $market?->match;
+
+        $sideLabel = $ticket->side === 'YES' ? 'OUI' : 'NON';
+        $oppositeSideLabel = $ticket->side === 'YES' ? 'NON' : 'OUI';
+        $homeName  = $match?->clanHome?->name ?? 'Équipe A';
+        $awayName  = $match?->clanAway?->name ?? 'Équipe B';
+        $marketTitle = $market?->title ?? "Victoire {$homeName}";
+
+        $shareTitle = "🎫 Pari P2P #{$ticket->ticket_number} : " . number_format($ticket->amount, 0, ',', ' ') . " FCFA engagés !";
+        $shareDescription = "Pari proposé sur \"{$sideLabel} - {$marketTitle}\" ({$homeName} VS {$awayName}). Cote 2.00 ! Clique pour prendre la position \"{$oppositeSideLabel}\" et tenter d'emporter " . number_format($ticket->gross_payout, 0, ',', ' ') . " FCFA !";
+
+        return response()->json([
+            'success'               => true,
+            'id'                    => $ticket->id,
+            'ticket_number'         => $ticket->ticket_number,
+            'status'                => $ticket->status,
+            'side'                  => $ticket->side ?? 'YES',
+            'opposite_side'         => $oppositeSideLabel,
+            'amount'                => $ticket->amount,
+            'odds'                  => $ticket->odds,
+            'gross_payout'          => $ticket->gross_payout,
+            'net_payout'            => $ticket->net_payout,
+            'creator_id'            => $ticket->creator_id,
+            'creator_name'          => $ticket->creator?->name ?? 'Joueur #' . $ticket->creator_id,
+            'created_at'            => $ticket->created_at->toISOString(),
+            'market' => [
+                'id'                => $market?->id,
+                'title'             => $marketTitle,
+                'category'          => $market?->category ?? 'team',
+                'status'            => $market?->status,
+                'betting_closes_at' => $market?->betting_closes_at?->toISOString(),
+                'allow_during_match'=> (bool) $market?->allow_during_match,
+                'is_open'           => $market?->isOpen() ?? false,
+            ],
+            'match' => [
+                'id'           => $match?->id,
+                'home'         => $homeName,
+                'away'         => $awayName,
+                'home_badge'   => $match?->clanHome?->badge_url,
+                'away_badge'   => $match?->clanAway?->badge_url,
+                'scheduled_at' => $match?->scheduled_at?->toISOString(),
+                'status'       => $match?->status,
+            ],
+            'share_meta' => [
+                'title'       => $shareTitle,
+                'description' => $shareDescription,
+            ],
+        ]);
+    }
+
     // ─── Formatters ──────────────────────────────────────────────────────────
 
     private function formatMarketSummary(BetMarket $market): array

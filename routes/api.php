@@ -116,6 +116,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/matches', [\App\Http\Controllers\ClashBet\TicketController::class, 'matches']);
         Route::get('/markets/{market}', [\App\Http\Controllers\ClashBet\TicketController::class, 'showMarket']);
         Route::get('/markets/{market}/tickets', [\App\Http\Controllers\ClashBet\TicketController::class, 'ticketsForMarket']);
+        Route::get('/public/tickets/{identifier}', [\App\Http\Controllers\ClashBet\TicketController::class, 'showPublic']);
 
         // Tickets P2P
         Route::post('/tickets', [\App\Http\Controllers\ClashBet\TicketController::class, 'create']);
