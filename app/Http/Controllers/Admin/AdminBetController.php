@@ -216,9 +216,36 @@ class AdminBetController extends Controller
     }
 
     /**
+     * POST /admin/clash-bet/markets/{market}/settle-auto
+     * Règlement automatique via le Rule Engine AST.
+     */
+    public function settleAuto(Request $request, BetMarket $market)
+    {
+        if ($market->status === 'settled') {
+            return response()->json(['success' => false, 'message' => 'Ce marché a déjà été réglé.'], 422);
+        }
+
+        try {
+            $stats = $this->ticketService->settleMarketAuto($market);
+
+            return response()->json([
+                'success'          => true,
+                'winning_side'     => $stats['winning_side'],
+                'settled'          => $stats['settled'],
+                'total_paid'       => $stats['total_paid'],
+                'total_commission' => $stats['total_commission'],
+                'message'          => "Règlement auto [Position {$stats['winning_side']}] : {$stats['settled']} ticket(s) réglé(s), {$stats['total_paid']} FCFA distribués.",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * POST /admin/clash-bet/markets/{market}/cancel
      * Annuler un marché et rembourser 100% sans frais.
      */
+
     public function cancel(Request $request, BetMarket $market)
     {
         $request->validate(['reason' => 'required|string|max:255']);
@@ -657,34 +684,8 @@ class AdminBetController extends Controller
         }
     }
 
-    /**
-     * POST /admin/clash-bet/markets/{market}/settle-auto
-     * Règlement automatique d'un marché par Rule Engine.
-     */
-    public function settleAuto(BetMarket $market)
-    {
-        try {
-            $stats = $this->ticketService->settleMarketAuto($market);
 
-            ClashBetAudit::create([
-                'admin_id'   => Auth::id(),
-                'event_type' => 'MARKET_SETTLED_AUTO',
-                'market_id'  => $market->id,
-                'payload'    => $stats,
-            ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => "Marché réglé automatiquement. Position gagnante: {$stats['winning_side']}.",
-                'stats'   => $stats,
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-            ], 422);
-        }
-    }
 
     /**
      * GET /admin/clash-bet/audits
