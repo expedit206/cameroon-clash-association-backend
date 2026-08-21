@@ -35,10 +35,31 @@ class BetController extends Controller
             ]);
         }
 
-        $markets = BetMarket::open()
-            ->withDetails()
-            ->latest()
-            ->paginate(20);
+        $query = BetMarket::open()->withDetails();
+
+        // 🔍 Recherche par titre de marché ou nom de clan
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhereHas('match.clanHome', fn($r) => $r->where('name', 'like', "%{$search}%"))
+                  ->orWhereHas('match.clanAway', fn($r) => $r->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        // 📂 Filtre par catégorie (team, player, duel, comparison)
+        if ($category = $request->query('category')) {
+            if ($category !== 'all') {
+                $query->where('category', $category);
+            }
+        }
+
+        // 🏟️ Filtre par match spécifique
+        if ($matchId = $request->query('match_id')) {
+            $query->where('match_id', $matchId);
+        }
+
+        // Tri : les plus récents en premier
+        $markets = $query->latest()->paginate(16, ['*'], 'page', $request->query('page', 1));
 
         $markets->getCollection()->transform(function ($market) {
             return $this->formatMarket($market);
@@ -46,6 +67,7 @@ class BetController extends Controller
 
         return response()->json($markets);
     }
+
 
     /**
      * GET /clash-bet/markets/{market}

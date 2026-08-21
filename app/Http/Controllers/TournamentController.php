@@ -109,6 +109,53 @@ class TournamentController extends Controller
     /**
      * Récupère le récapitulatif MVP & bilan global de la phase de poules.
      */
+    /**
+     * Retourne le clan champion de la Saison 1 (vainqueur de la Grande Finale).
+     * Retourne null si la finale n'a pas encore de vainqueur.
+     */
+    public function getChampion()
+    {
+        $final = TournamentMatch::with(['winnerClan', 'clanHome', 'clanAway'])
+            ->where('phase', 'final')
+            ->where('status', 'completed')
+            ->whereNotNull('winner_clan_id')
+            ->first();
+
+        if (!$final || !$final->winnerClan) {
+            return response()->json(['champion' => null]);
+        }
+
+        $champion = $final->winnerClan;
+        $isHome = $final->winner_clan_id === $final->clan_home_id;
+
+        return response()->json([
+            'champion' => [
+                'id'          => $champion->id,
+                'name'        => $champion->name,
+                'tag'         => $champion->tag_coc,
+                'badge_url'   => $champion->badge_url,
+                'clan_level'  => $champion->clan_level,
+                'stars'       => $isHome ? $final->total_stars_home : $final->total_stars_away,
+                'destruction' => $isHome ? $final->total_destruction_home : $final->total_destruction_away,
+            ],
+            'runner_up' => [
+                'id'        => $isHome ? $final->clanAway?->id : $final->clanHome?->id,
+                'name'      => $isHome ? $final->clanAway?->name : $final->clanHome?->name,
+                'badge_url' => $isHome ? $final->clanAway?->badge_url : $final->clanHome?->badge_url,
+                'stars'     => $isHome ? $final->total_stars_away : $final->total_stars_home,
+            ],
+            'match' => [
+                'stars_winner'    => $isHome ? $final->total_stars_home : $final->total_stars_away,
+                'stars_runner_up' => $isHome ? $final->total_stars_away : $final->total_stars_home,
+                'destruction_winner'    => $isHome ? $final->total_destruction_home : $final->total_destruction_away,
+                'destruction_runner_up' => $isHome ? $final->total_destruction_away : $final->total_destruction_home,
+            ],
+        ]);
+    }
+
+    /**
+     * Récupère le récapitulatif MVP & bilan global de la phase de poules.
+     */
     public function getGroupStageSummary(\App\Services\GroupStageService $service)
     {
         $standings = $service->getGroupStandings(1);

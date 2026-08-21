@@ -21,6 +21,8 @@ Route::get('/tournament/matches', [\App\Http\Controllers\TournamentController::c
 Route::get('/tournament/clans', [\App\Http\Controllers\TournamentController::class, 'getClans']);
 Route::get('/tournament/groups', [\App\Http\Controllers\TournamentController::class, 'getGroups']);
 Route::get('/tournament/group-stage-summary', [\App\Http\Controllers\TournamentController::class, 'getGroupStageSummary']);
+Route::get('/tournament/champion', [\App\Http\Controllers\TournamentController::class, 'getChampion']);
+
 
 // --- Découverte des Clans & Joueurs ---
 Route::get('/clans/cameroun', [ClanDiscoveryController::class, 'searchCamerounClans']);
@@ -135,6 +137,8 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Administration Clash Bet
+        Route::post('admin/clash-bet/markets/{market}/delete', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
+
     Route::middleware('can:admin')->prefix('admin/clash-bet')->group(function () {
         Route::get('/stats', [\App\Http\Controllers\Admin\AdminBetController::class, 'stats']);
         Route::get('/settings', [\App\Http\Controllers\Admin\AdminBetController::class, 'settings']);
@@ -149,7 +153,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/markets/{market}/settle', [\App\Http\Controllers\Admin\AdminBetController::class, 'settle']);
         Route::post('/markets/{market}/settle-auto', [\App\Http\Controllers\Admin\AdminBetController::class, 'settleAuto']);
         Route::post('/markets/{market}/cancel', [\App\Http\Controllers\Admin\AdminBetController::class, 'cancel']);
-        Route::delete('/markets/{market}', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
+        // Route::delete('/markets/{market}', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
         Route::post('/markets/{market}/delete', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMarket']);
         Route::delete('/matches/{match}/markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
         Route::post('/matches/{match}/delete-markets', [\App\Http\Controllers\Admin\AdminBetController::class, 'destroyMatchMarkets']);
