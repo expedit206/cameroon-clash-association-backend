@@ -4,26 +4,46 @@ namespace App\Http\Controllers;
 
 use App\Models\Clan;
 use App\Models\ClanRegistration;
+use App\Models\Competition;
 use App\Models\TournamentMatch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Gère l'affichage public du tournoi (classement, bracket, résultats).
+ * Toutes les requêtes sont scopées sur la compétition active (Saison 2).
  */
 class TournamentController extends Controller
 {
     /**
+     * Récupère la compétition active (la plus récente non terminée, ou la dernière saison).
+     * Priorité : in_progress > open > draft > finished
+     */
+    private function currentCompetition(): ?Competition
+    {
+        return Competition::query()
+            ->orderByRaw("FIELD(status, 'in_progress', 'open', 'draft', 'closed', 'finished')")
+            ->orderByDesc('season_number')
+            ->first();
+    }
+
+    /**
      * Récupère le classement (Leaderboard) des clans inscrits.
-     * Basé sur les statistiques enregistrées dans ClanRegistration.
      */
     public function getLeaderboard()
     {
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json([]);
+        }
+
         $leaderboard = ClanRegistration::with('clan')
+            ->where('competition_id', $competition->id)
             ->where('status', 'confirmed')
-            ->orderByDesc('total_stars') // Priorité 1 : Étoiles
-            ->orderByDesc('destruction_percentage') // Priorité 2 : %
-            ->orderBy('created_at', 'asc') // Tie-break : Premier inscrit
+            ->orderByDesc('total_stars')
+            ->orderByDesc('destruction_percentage')
+            ->orderBy('created_at', 'asc')
             ->get();
 
         return response()->json($leaderboard);
@@ -34,18 +54,28 @@ class TournamentController extends Controller
      */
     public function getBracket()
     {
-        // On récupère tous les matches organisés par round
-        // Rounds : 1 (8èmes), 2 (Quarts), 3 (Demis), 4 (Finale)
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json([
+                'r16' => [],
+                'r8'  => [],
+                'r4'  => [],
+                'r2'  => [],
+            ]);
+        }
+
         $matches = TournamentMatch::with(['clanHome', 'clanAway'])
+            ->where('competition_id', $competition->id)
             ->orderBy('round')
             ->orderBy('match_number')
             ->get();
 
         $mapped = [
             'r16' => [],
-            'r8' => [],
-            'r4' => [],
-            'r2' => []
+            'r8'  => [],
+            'r4'  => [],
+            'r2'  => [],
         ];
 
         foreach ($matches as $match) {
@@ -63,21 +93,29 @@ class TournamentController extends Controller
     }
 
     /**
-     * Liste des 16 clans d'élite officiellement confirmés.
+     * Liste des clans officiellement confirmés pour la compétition active.
      */
     public function getClans()
     {
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json([]);
+        }
+
         $clans = ClanRegistration::with('clan')
+            ->where('competition_id', $competition->id)
             ->where('status', 'confirmed')
+            ->orderBy('seed_number')
             ->get()
             ->map(function ($reg) {
                 return [
-                    'id' => $reg->clan->id,
-                    'name' => $reg->clan->name,
-                    'tag' => $reg->clan->tag_coc,
+                    'id'    => $reg->clan->id,
+                    'name'  => $reg->clan->name,
+                    'tag'   => $reg->clan->tag_coc,
                     'badge' => $reg->clan->badge_url,
                     'level' => $reg->clan->clan_level,
-                    'seed' => $reg->seed_number
+                    'seed'  => $reg->seed_number,
                 ];
             });
 
@@ -85,11 +123,18 @@ class TournamentController extends Controller
     }
 
     /**
-     * Récupère la liste de tous les matchs du tournoi (poules + phase finale).
+     * Récupère la liste de tous les matchs de la compétition active.
      */
     public function getMatches()
     {
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json([]);
+        }
+
         $matches = TournamentMatch::with(['clanHome', 'clanAway'])
+            ->where('competition_id', $competition->id)
             ->orderByRaw('CASE WHEN scheduled_at IS NULL THEN 1 ELSE 0 END')
             ->orderBy('scheduled_at', 'asc')
             ->orderBy('match_number', 'asc')
@@ -99,23 +144,38 @@ class TournamentController extends Controller
     }
 
     /**
-     * Récupère le classement général des équipes.
+     * Récupère le classement des poules (si format groupes).
+     * Pour la Saison 2 (élimination directe) cela retournera des tableaux vides.
      */
     public function getGroups(\App\Services\GroupStageService $service)
     {
-        return response()->json($service->getGroupStandings(1));
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json(['A' => [], 'B' => []]);
+        }
+
+        return response()->json($service->getGroupStandings($competition->id));
     }
 
     /**
-     * Récupère le récapitulatif MVP & bilan global de la phase de poules.
+     * Retourne le champion de la compétition active (ou null).
+     * Pour le palmarès Saison 1 on pourra appeler avec ?season=1 plus tard.
      */
-    /**
-     * Retourne le clan champion de la Saison 1 (vainqueur de la Grande Finale).
-     * Retourne null si la finale n'a pas encore de vainqueur.
-     */
-    public function getChampion()
+    public function getChampion(Request $request)
     {
+        $season = $request->query('season');
+
+        $competition = $season
+            ? Competition::where('season_number', $season)->first()
+            : $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json(['champion' => null]);
+        }
+
         $final = TournamentMatch::with(['winnerClan', 'clanHome', 'clanAway'])
+            ->where('competition_id', $competition->id)
             ->where('phase', 'final')
             ->where('status', 'completed')
             ->whereNotNull('winner_clan_id')
@@ -145,20 +205,35 @@ class TournamentController extends Controller
                 'stars'     => $isHome ? $final->total_stars_away : $final->total_stars_home,
             ],
             'match' => [
-                'stars_winner'    => $isHome ? $final->total_stars_home : $final->total_stars_away,
-                'stars_runner_up' => $isHome ? $final->total_stars_away : $final->total_stars_home,
+                'stars_winner'          => $isHome ? $final->total_stars_home : $final->total_stars_away,
+                'stars_runner_up'       => $isHome ? $final->total_stars_away : $final->total_stars_home,
                 'destruction_winner'    => $isHome ? $final->total_destruction_home : $final->total_destruction_away,
                 'destruction_runner_up' => $isHome ? $final->total_destruction_away : $final->total_destruction_home,
             ],
+            'season' => $competition->season_number,
         ]);
     }
 
     /**
-     * Récupère le récapitulatif MVP & bilan global de la phase de poules.
+     * Récapitulatif MVP & bilan de la phase de poules (si applicable).
      */
     public function getGroupStageSummary(\App\Services\GroupStageService $service)
     {
-        $standings = $service->getGroupStandings(1);
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json([
+                'top_attack' => null,
+                'top_destruction' => null,
+                'undefeated_clans' => [],
+                'qualified_clans' => [],
+                'total_group_matches' => 0,
+                'completed_group_matches' => 0,
+                'is_completed' => false,
+            ]);
+        }
+
+        $standings = $service->getGroupStandings($competition->id);
         $allClans = array_merge($standings['A'] ?? [], $standings['B'] ?? []);
 
         if (empty($allClans)) {
@@ -173,24 +248,21 @@ class TournamentController extends Controller
             ]);
         }
 
-        // Top Attaque (Le clan avec le plus d'étoiles)
         $topAttack = collect($allClans)->sortByDesc('total_stars')->first();
-
-        // Top Destruction (% moyen de destruction le plus élevé)
         $topDestruction = collect($allClans)->sortByDesc('avg_destruction')->first();
+        $undefeated = collect($allClans)
+            ->filter(fn($c) => $c['played'] > 0 && $c['lost'] === 0)
+            ->values()
+            ->all();
 
-        // Clans Invaincus (0 défaite)
-        $undefeated = collect($allClans)->filter(fn($c) => $c['played'] > 0 && $c['lost'] === 0)->values()->all();
-
-        // Les 4 qualifiés (Top 2 Groupe A & Top 2 Groupe B)
         $qualifiedA = collect($standings['A'] ?? [])->take(2)->values()->all();
         $qualifiedB = collect($standings['B'] ?? [])->take(2)->values()->all();
 
-        // Statistiques des matchs de poule
-        $groupMatches = TournamentMatch::where('competition_id', 1)
-            ->where(function($q) {
+        $groupMatches = TournamentMatch::where('competition_id', $competition->id)
+            ->where(function ($q) {
                 $q->where('phase', 'group_stage')->orWhereNotNull('group');
-            })->get();
+            })
+            ->get();
 
         $totalMatches = $groupMatches->count();
         $completedMatches = $groupMatches->where('status', 'completed')->count();
@@ -206,6 +278,37 @@ class TournamentController extends Controller
             'total_group_matches' => $totalMatches,
             'completed_group_matches' => $completedMatches,
             'is_completed' => $totalMatches > 0 && $totalMatches === $completedMatches,
+        ]);
+    }
+
+    /**
+     * Optionnel mais très utile : retourne les infos de la compétition active.
+     * À appeler côté front au lieu de hardcoder les prix / dates.
+     */
+    public function getCompetition()
+    {
+        $competition = $this->currentCompetition();
+
+        if (!$competition) {
+            return response()->json(null, 404);
+        }
+
+        return response()->json([
+            'id'                     => $competition->id,
+            'name'                   => $competition->name,
+            'slug'                   => $competition->slug,
+            'season_number'          => $competition->season_number,
+            'format'                 => $competition->format,
+            'max_teams'              => $competition->max_teams,
+            'registration_fee'       => $competition->registration_fee,
+            'status'                 => $competition->status,
+            'registration_opens_at'  => $competition->registration_opens_at,
+            'registration_closes_at' => $competition->registration_closes_at,
+            'starts_at'              => $competition->starts_at,
+            'ends_at'                => $competition->ends_at,
+            'prize_1st'              => $competition->prize_1st,
+            'prize_2nd'              => $competition->prize_2nd,
+            'prize_3rd'              => $competition->prize_3rd,
         ]);
     }
 }

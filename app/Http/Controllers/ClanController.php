@@ -164,35 +164,156 @@ class ClanController extends Controller
     }
 
     /**
-     * Détails d'un clan directement depuis l'API CoC (aucun enregistrement BDD requis).
-     * Le tag arrive sans '#' depuis l'URL (ex: 2GGLPPL8L), le service CocApi gère le formatage.
+     * Détails d'un clan avec son profil, ses membres et son parcours complet en tournoi.
+     * Le tag arrive avec ou sans '#'.
      */
     public function show(string $tag)
     {
-        // Décoder au cas où il y aurait un encodage résiduel
         $decodedTag = urldecode($tag);
-        \Illuminate\Support\Facades\Log::info("[Clan Show] tag reçu: " . $decodedTag);
+        $normalizedTag = strtoupper(trim($decodedTag));
+        if (!str_starts_with($normalizedTag, '#')) {
+            $normalizedTag = '#' . $normalizedTag;
+        }
 
-        // Appel direct à l'API CoC via le service dédié
-        $cocClan = $this->cocApi->getClan($decodedTag);
-        // $cocClan = $this->cocApi->getClan($decodedTag);
+        // 1. Récupérer le clan en BDD
+        $clan = Clan::where('tag_coc', $normalizedTag)
+            ->orWhere('tag_coc', str_replace('#', '', $normalizedTag))
+            ->first();
 
-        if (!$cocClan) {
+        // 2. Tenter de récupérer les données CoC pour les membres / visuel si nécessaire
+        $cocClan = $this->cocApi->getClan($normalizedTag);
+
+        if (!$clan && !$cocClan) {
             return response()->json([
-                'message' => "Clan '{$decodedTag}' introuvable sur l'API Clash of Clans."
+                'message' => "Clan '{$normalizedTag}' introuvable."
             ], 404);
         }
 
-        // Formater la réponse pour correspondre à ce qu'attend le frontend
+        // Si le clan n'existait pas en BDD mais existe dans CoC API, le créer à la volée
+        if (!$clan && $cocClan) {
+            $clan = Clan::create([
+                'tag_coc'    => $cocClan['tag'],
+                'name'       => $cocClan['name'],
+                'badge_url'  => $cocClan['badgeUrls']['medium'] ?? null,
+                'clan_level' => $cocClan['clanLevel'] ?? 1,
+                'status'     => 'validated',
+            ]);
+        }
+
+        // 3. Récupérer l'inscription au tournoi
+        $registration = \App\Models\ClanRegistration::where('clan_id', $clan->id)
+            ->where('competition_id', 1)
+            ->first();
+
+        // 4. Récupérer tous les matchs du clan dans la compétition 1 (Poules + Éliminatoires)
+        $matches = \App\Models\TournamentMatch::with(['clanHome', 'clanAway'])
+            ->where('competition_id', 1)
+            ->where(function ($q) use ($clan) {
+                $q->where('clan_home_id', $clan->id)
+                  ->orWhere('clan_away_id', $clan->id);
+            })
+            ->orderBy('phase', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $played = 0;
+        $won = 0;
+        $drawn = 0;
+        $lost = 0;
+        $totalStars = 0;
+        $totalDestruction = 0.0;
+
+        $formattedMatches = [];
+
+        foreach ($matches as $match) {
+            $isHome = $match->clan_home_id === $clan->id;
+            $opponent = $isHome ? $match->clanAway : $match->clanHome;
+
+            $myStars   = (int) ($isHome ? $match->total_stars_home : $match->total_stars_away);
+            $oppStars  = (int) ($isHome ? $match->total_stars_away : $match->total_stars_home);
+            $myDest    = (float) ($isHome ? $match->total_destruction_home : $match->total_destruction_away);
+            $oppDest   = (float) ($isHome ? $match->total_destruction_away : $match->total_destruction_home);
+
+            $result = 'pending';
+
+            if ($match->status === 'completed') {
+                $played++;
+                $totalStars += $myStars;
+                $totalDestruction += $myDest;
+
+                if ($myStars > $oppStars) {
+                    $result = 'win';
+                    $won++;
+                } elseif ($oppStars > $myStars) {
+                    $result = 'loss';
+                    $lost++;
+                } else {
+                    if ($myDest > $oppDest) {
+                        $result = 'win';
+                        $won++;
+                    } elseif ($oppDest > $myDest) {
+                        $result = 'loss';
+                        $lost++;
+                    } else {
+                        $result = 'draw';
+                        $drawn++;
+                    }
+                }
+            }
+
+            $formattedMatches[] = [
+                'id'                   => $match->id,
+                'phase'                => $match->phase,
+                'group'                => $match->group,
+                'status'               => $match->status,
+                'scheduled_at'         => $match->scheduled_at,
+                'is_home'              => $isHome,
+                'opponent'             => $opponent ? [
+                    'id'        => $opponent->id,
+                    'name'      => $opponent->name,
+                    'tag_coc'   => $opponent->tag_coc,
+                    'badge_url' => $opponent->badge_url,
+                ] : null,
+                'my_stars'             => $myStars,
+                'opp_stars'            => $oppStars,
+                'my_destruction'       => $myDest,
+                'opp_destruction'      => $oppDest,
+                'result'               => $result,
+            ];
+        }
+
+        $points = ($won * 3) + ($drawn * 1);
+        $avgDestruction = $played > 0 ? round($totalDestruction / $played, 2) : 0.0;
+
         return response()->json([
-            'name'        => $cocClan['name'],
-            'tag_coc'     => $cocClan['tag'],
-            'clan_level'  => $cocClan['clanLevel'],
-            'badge_url'   => $cocClan['badgeUrls']['medium'] ?? null,
-            'members'     => $cocClan['members'] ?? [],
-            'description' => $cocClan['description'] ?? null,
-            'type'        => $cocClan['type'] ?? null,
-            'location'    => $cocClan['location'] ?? null,
+            'name'             => $clan->name,
+            'tag_coc'          => $clan->tag_coc,
+            'clan_level'       => $clan->clan_level ?? ($cocClan['clanLevel'] ?? 1),
+            'badge_url'        => $clan->badge_url ?? ($cocClan['badgeUrls']['medium'] ?? null),
+            'description'      => $cocClan['description'] ?? null,
+            'type'             => $cocClan['type'] ?? null,
+            'location'         => $cocClan['location'] ?? null,
+            'members'          => $cocClan['members'] ?? [],
+            'members_count'    => $cocClan['members'] ? count($cocClan['members']) : 0,
+
+            // Données du tournoi
+            'tournament_registration' => $registration ? [
+                'status' => $registration->status,
+                'group'  => $registration->group,
+                'seed'   => $registration->seed_number,
+            ] : null,
+
+            'tournament_stats' => [
+                'played'          => $played,
+                'won'             => $won,
+                'drawn'           => $drawn,
+                'lost'            => $lost,
+                'points'          => $points,
+                'total_stars'     => $totalStars,
+                'avg_destruction' => $avgDestruction,
+            ],
+
+            'tournament_matches' => $formattedMatches,
         ]);
     }
 }

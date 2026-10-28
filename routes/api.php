@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\ClanDiscoveryController;
 use App\Http\Controllers\PlayerDiscoveryController;
+use App\Http\Controllers\TournamentController;
 
 // --- Authentification ---
 Route::post('/auth/register', [AuthController::class, 'register']);
@@ -22,7 +23,7 @@ Route::get('/tournament/clans', [\App\Http\Controllers\TournamentController::cla
 Route::get('/tournament/groups', [\App\Http\Controllers\TournamentController::class, 'getGroups']);
 Route::get('/tournament/group-stage-summary', [\App\Http\Controllers\TournamentController::class, 'getGroupStageSummary']);
 Route::get('/tournament/champion', [\App\Http\Controllers\TournamentController::class, 'getChampion']);
-
+Route::get('/tournament/competition', [TournamentController::class, 'getCompetition']);    
 
 // --- Découverte des Clans & Joueurs ---
 Route::get('/clans/cameroun', [ClanDiscoveryController::class, 'searchCamerounClans']);
